@@ -58,6 +58,11 @@ function addressField(value: string | undefined, what: string): Uint8Array {
 
 function memoBytes(memo: string | undefined): Uint8Array {
   if (!memo) return new Uint8Array(0)
+  // A lone surrogate is not valid text. TextEncoder would quietly substitute
+  // U+FFFD, so the bytes signed would not be the memo the caller passed.
+  if (/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(memo)) {
+    throw new XeUsageError('memo is not valid UTF-8: it contains an unpaired surrogate')
+  }
   const bytes = new TextEncoder().encode(memo)
   if (bytes.length > MAX_MEMO_BYTES) {
     throw new XeUsageError(`memo too long: ${bytes.length} bytes (max ${MAX_MEMO_BYTES})`)

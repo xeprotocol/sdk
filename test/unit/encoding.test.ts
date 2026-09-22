@@ -108,3 +108,16 @@ describe('aux encoding', () => {
     expect(new TextDecoder().decode(aux.slice(8 + 18 + 8))).toBe(PUB)
   })
 })
+
+describe('memo text validity', () => {
+  it('rejects an unpaired surrogate rather than substituting U+FFFD', () => {
+    // TextEncoder would silently replace it, so the bytes signed would not be
+    // the memo the caller passed.
+    expect(() => marshalCanonical(send({ memo: 'bad \uD800 memo' }))).toThrow(/unpaired surrogate/)
+    expect(() => marshalCanonical(send({ memo: 'bad \uDC00 memo' }))).toThrow(/unpaired surrogate/)
+  })
+
+  it('accepts a correctly paired surrogate', () => {
+    expect(() => marshalCanonical(send({ memo: 'emoji 😀 ok' }))).not.toThrow()
+  })
+})

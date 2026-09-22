@@ -188,3 +188,41 @@ describe('toWire', () => {
     expect(toWire({ ...base, pubKey: 'a'.repeat(64) as never })['pub_key']).toBe('a'.repeat(64))
   })
 })
+
+describe('remaining read endpoints', () => {
+  const cases: Array<[string, (c: XeClient) => Promise<unknown>, string, unknown]> = [
+    ['/node', (c) => c.nodeInfo(), '{"id":"n1"}', { id: 'n1' }],
+    ['/supply', (c) => c.supply(), '{"XE":{"total":42}}', { XE: { total: 42n } }],
+    ['/blocks/{hash}', (c) => c.block(toHash('a'.repeat(64))), '{"hash":"x"}', { hash: 'x' }],
+    ['/leases', (c) => c.leases(), '{"leases":[{"h":1}]}', [{ h: 1 }]],
+    ['/leases/{hash}', (c) => c.lease(toHash('b'.repeat(64))), '{"state":"settled"}', { state: 'settled' }],
+    ['/statechain/tip', (c) => c.statechainTip(), '{"index":9}', { index: 9 }],
+    ['/statechain/kv/{key}', (c) => c.statechainValue('sys.timekeepers'), '{"keys":[]}', { keys: [] }],
+    ['/accounts/{a}/chain', (c) => c.chain(ADDR), '{"blocks":[{"i":1}]}', [{ i: 1 }]],
+  ]
+
+  for (const [name, call, body, expected] of cases) {
+    it(`binds ${name}`, async () => {
+      const { c } = client([{ status: 200, body }])
+      await expect(call(c)).resolves.toEqual(expected)
+    })
+
+    it(`throws rather than returning empty when ${name} fails`, async () => {
+      const { c } = client([{ status: 500, body: '{"error":"down"}' }])
+      await expect(call(c)).rejects.toThrow(XeApiError)
+    })
+  }
+
+  it('passes pagination through to the chain endpoint', async () => {
+    const { c, calls } = client([{ status: 200, body: '{"blocks":[]}' }])
+    await c.chain(ADDR, { limit: 5, offset: 10 })
+    expect(calls[0]).toContain('limit=5')
+    expect(calls[0]).toContain('offset=10')
+  })
+
+  it('filters leases by state', async () => {
+    const { c, calls } = client([{ status: 200, body: '[]' }])
+    await c.leases('accepted')
+    expect(calls[0]).toContain('state=accepted')
+  })
+})

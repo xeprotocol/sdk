@@ -6,24 +6,24 @@ describe('lossless JSON', () => {
   it('preserves a nanosecond timestamp that JSON.parse would round', () => {
     const text = '{"timestamp": 1781800000000000001}'
     expect(JSON.parse(text).timestamp).toBe(1781800000000000000) // the bug
-    const parsed = parseLossless(text) as { timestamp: string }
-    expect(BigInt(parsed.timestamp)).toBe(1781800000000000001n) // the fix
+    const parsed = parseLossless(text) as { timestamp: bigint }
+    expect(parsed.timestamp).toBe(1781800000000000001n) // the fix
   })
 
   it('preserves the largest uint64', () => {
-    const parsed = parseLossless('{"amount": 18446744073709551615}') as { amount: string }
-    expect(BigInt(parsed.amount)).toBe(18446744073709551615n)
+    const parsed = parseLossless('{"amount": 18446744073709551615}') as { amount: bigint }
+    expect(parsed.amount).toBe(18446744073709551615n)
   })
 
   it('reaches nested fields', () => {
-    const parsed = parseLossless('{"block":{"balance": 9007199254740993}}') as { block: { balance: string } }
-    expect(BigInt(parsed.block.balance)).toBe(9007199254740993n)
+    const parsed = parseLossless('{"block":{"balance": 9007199254740993}}') as { block: { balance: bigint } }
+    expect(parsed.block.balance).toBe(9007199254740993n)
   })
 
   it('leaves unrelated numbers alone', () => {
-    const parsed = parseLossless('{"count": 5, "amount": 5}') as { count: number; amount: string }
+    const parsed = parseLossless('{"count": 5, "amount": 5}') as { count: number; amount: bigint }
     expect(parsed.count).toBe(5)
-    expect(parsed.amount).toBe('5')
+    expect(parsed.amount).toBe(5n)
   })
 
   it('does not corrupt strings that merely contain a key name', () => {
@@ -59,11 +59,26 @@ describe('lossless JSON', () => {
 
     it('round-trips through the lossless parser', () => {
       const out = stringifyWithBigInts({ amount: 18446744073709551615n })
-      expect(BigInt((parseLossless(out) as { amount: string }).amount)).toBe(18446744073709551615n)
+      expect((parseLossless(out) as { amount: bigint }).amount).toBe(18446744073709551615n)
     })
 
     it('leaves ordinary values untouched', () => {
       expect(stringifyWithBigInts({ a: 1, b: 'x', c: null })).toBe('{"a":1,"b":"x","c":null}')
     })
+  })
+})
+
+describe('marker safety', () => {
+  it('does not revive a string the node genuinely sent', () => {
+    // The marker is only ever written by this module, in front of digits, and
+    // a string that merely looks numeric must stay a string.
+    const parsed = parseLossless('{"note":"12345678901234567890"}') as { note: string }
+    expect(parsed.note).toBe('12345678901234567890')
+    expect(typeof parsed.note).toBe('string')
+  })
+
+  it('leaves a memo containing digits untouched', () => {
+    const parsed = parseLossless('{"memo":"paid 1781800000000000001 units"}') as { memo: string }
+    expect(parsed.memo).toBe('paid 1781800000000000001 units')
   })
 })

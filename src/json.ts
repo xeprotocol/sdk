@@ -3,7 +3,9 @@
  *
  * `timestamp` (~1.8e18 nanoseconds), `balance`, `amount` and `pow_nonce` all
  * exceed Number.MAX_SAFE_INTEGER. JSON.parse turns them into Numbers and
- * rounds, silently — a rounded timestamp produces a block the network rejects,
+ * rounds, silently. Parsed values come back as `bigint`, not strings, so a
+ * caller reading a raw response object gets the same type the typed accessors
+ * hand them — a rounded timestamp produces a block the network rejects,
  * and a rounded balance is simply wrong. So numeric literals for those keys are
  * rewritten to strings before parsing, and revived as bigint.
  *
@@ -30,6 +32,20 @@ const U64_KEYS = [
 ] as const
 
 const U64_PATTERN = new RegExp(`"(${U64_KEYS.join('|')})"\\s*:\\s*(-?\\d+)`, 'g')
+
+/**
+ * Marker for a number this module quoted on the way in, so the reviver can
+ * turn it back into a bigint and not mistake it for a string the node sent.
+ * Only ever written here, and only in front of digits.
+ */
+const MARK = '\u0000xe-u64:'
+
+/**
+ * The same marker as it must appear INSIDE the JSON text. A raw NUL is not
+ * legal in a JSON string literal, so it is written as its escape — which also
+ * means a value the node sent could only collide by escaping a NUL itself.
+ */
+const MARK_JSON = '\\u0000xe-u64:'
 
 /**
  * Digits at which a JSON integer may exceed Number.MAX_SAFE_INTEGER
@@ -81,7 +97,7 @@ function quoteLongIntegers(text: string): string {
       // A fraction or exponent is not an integer; leave it to JSON.parse.
       const isInteger = next !== '.' && next !== 'e' && next !== 'E'
       const token = text.slice(i, j)
-      out += isInteger && digits >= UNSAFE_DIGITS ? `"${token}"` : token
+      out += isInteger && digits >= UNSAFE_DIGITS ? `"${MARK_JSON}${token}"` : token
       i = j
       continue
     }
@@ -97,7 +113,10 @@ export function parseLossless(text: string): unknown {
   // everything else — including values under keys we do not control, such as
   // the asset-keyed balance map. Already-quoted values are inside strings by
   // then, so the scanner steps over them.
-  return JSON.parse(quoteLongIntegers(text.replace(U64_PATTERN, '"$1":"$2"')))
+  const marked = quoteLongIntegers(text.replace(U64_PATTERN, `"$1":"${MARK_JSON}$2"`))
+  return JSON.parse(marked, (_key, value: unknown) =>
+    typeof value === 'string' && value.startsWith(MARK) ? BigInt(value.slice(MARK.length)) : value,
+  )
 }
 
 /** Read a uint64-bearing field that parseLossless left as a decimal string. */
