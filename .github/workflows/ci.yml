@@ -1,0 +1,67 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The crypto is pure JS so it runs anywhere, but the SDK is meant to
+        # work on the Node version people actually have as well as the current
+        # one. Test both rather than assume.
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+
+  browser:
+    # The same crypto has to work in a browser: the SDK is for programs that
+    # hold their own keys, and plenty of those run in a page.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx vitest run test/unit --browser.enabled --browser.headless --browser.name=chromium --browser.provider=playwright
+
+  integration:
+    # Against the live testnet. Allowed to fail the job without failing the
+    # build: the network is a shared, wipeable testnet and an outage there is
+    # not a defect in this repository.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:integration
+        env:
+          XE_NODE: https://ldn.core.test.network
+          XE_FAUCET: https://faucet.test.network

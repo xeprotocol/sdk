@@ -5,8 +5,8 @@
 <h1 align="center">XE SDK</h1>
 
 <p align="center">
-  The client library for the XE network.<br>
-  Hold your own keys, lease a real machine, keep it for as long as you need it, get your work back.
+  The TypeScript client for the XE network.<br>
+  Hold your own keys, move value, and never run a node to do it.
 </p>
 
 <p align="center">
@@ -17,100 +17,150 @@
 
 ---
 
-> ### ⚠️ Nothing is here yet
+> ### ⚠️ Pre-release
 >
-> This repository is a placeholder. The SDK is being designed and **no code has
-> been published to it**. It exists now so the name is stable and the intent is
-> public — not because there is something to install.
->
-> - **There is no package to install**, in any language. The language itself is
->   not settled.
-> - **Everything below describes intent, not behaviour.** Every part of it is
->   liable to change, including the shape of the API and the names in it.
-> - XE is pre-1.0 and runs on a **public testnet only**. Protocol changes land
->   by wiping the testnet and re-bootstrapping; balances, accounts and history
->   are discarded when that happens, on purpose and without warning.
+> - **Not published to a registry yet.** Build it from this repository or wait.
+> - XE is pre-1.0 and runs on a **public testnet only**. Protocol changes land by
+>   wiping the testnet and re-bootstrapping; balances, accounts and history are
+>   discarded when that happens, on purpose and without warning.
 > - **There is no backward compatibility**, and there will be none before 1.0.
->   Assume anything published here breaks.
+>   The API in here will change.
 > - **XE has no monetary value.** Testnet coins are for testing.
 > - The current network is **`testnet-0003`**.
 
-## What this is for
+## What it does
 
-XE lets you rent a real machine from a stranger and pay for it on a ledger with
-no fees and no miners. The node software is the network; this SDK is how a
-program uses it.
+XE's ledger is a lattice: every account owns its own signed chain, and a transfer
+is two blocks — a `send` on the sender's chain and a `receive` on the
+recipient's. There are no fees and no miners.
 
-The shape it is being built to:
+This SDK builds, signs and proves those blocks **locally** and submits them to
+any node's HTTP API. That means:
+
+- **You do not run a node.** Point it at a public one.
+- **Your keys never leave your process.** Nothing is ever handed to a node.
+- **It works in Node and in a browser**, on the same code path.
+
+## Quick start
+
+```ts
+import { Wallet, Xe, fromMicro, toMicro } from '@xeprotocol/sdk'
+
+const wallet = Wallet.create()          // or Wallet.fromSeedHex(process.env.SEED)
+console.log(wallet.address)             // hand this out to receive funds
+
+const xe = new Xe({ client: 'https://ldn.core.test.network', wallet })
+
+// Anything sent to you arrives as PENDING and is yours only once you claim it.
+await xe.receiveAll()
+
+console.log(fromMicro(await xe.balance('XE')), 'XE')
+
+await xe.send({
+  to: someAddress,
+  amount: toMicro('1.5'),
+  memo: 'thanks',
+})
+```
+
+### Address is not public key
+
+An address is derived from a public key, and the two are different values:
 
 ```
-  import a wallet        keys stay on your side and never leave it
-  find a machine         providers advertise what they have and what they charge
-  take it                open a lease, and the machine is yours
-  do the work            your code, your data, your results
-  hold it open           keep it for as long as you need, pay for the time you hold it
-  let it go              stop, and it stops costing you
+address = sha256("xe/account/v1" || pubkey)
 ```
 
-Two things worth knowing up front, because they shape everything else:
+The **address** is identity — it goes in a block's `account` and `destination`,
+and it is what you paste to receive funds. The **public key** is a credential.
+Keeping them apart is what lets a key be rotated without the account changing,
+so the SDK types them distinctly and will not let you pass one where the other
+belongs.
 
-**You do not need to run a node.** The SDK builds and signs blocks locally and
-talks to any node's HTTP API. Running infrastructure is not a prerequisite for
-using the network, and handing your keys to someone else's node is never
-required.
+### Amounts are integers
 
-**A machine is not a fixed-term rental.** You hold it for as long as you keep
-holding it, and you stop paying when you stop. There is no term to commit to up
-front and no refund to chase afterwards, because money you never spent stays
-where it is.
+Both assets carry six decimal places and every amount on the wire is an integer
+count of micro-units. Timestamps are unix **nanoseconds**. Both exceed what a
+JavaScript `number` can hold exactly, so the SDK uses `bigint` throughout and
+parses responses losslessly — a rounded timestamp produces a block the network
+rejects, and a rounded balance is just wrong.
 
-This is meant to be usable by a program with nobody watching it. A person
-opening a terminal is one way to use XE; software deciding on its own to go and
-rent a machine is the one being designed for.
+```ts
+toMicro('1.5')        // 1500000n
+fromMicro(1500000n)   // '1.500000'
+```
 
-## Status
+### Errors tell you whether to retry
 
-Honest, and it is all one answer today:
+The node distinguishes a failure worth retrying (a block that arrived before its
+dependency) from a terminal one (a bad signature). That distinction is carried
+through, so you never have to guess from a message:
+
+```ts
+import { isRetryable } from '@xeprotocol/sdk'
+
+try {
+  await xe.send({ to, amount })
+} catch (err) {
+  if (isRetryable(err)) { /* back off and try again */ }
+}
+```
+
+A non-2xx response always throws. An empty list from this SDK means the account
+genuinely has nothing — never that the request failed.
+
+## What works today
 
 | Area | Status |
 |---|---|
-| Published package | 🚧 nothing published |
-| Language and package name | 🚧 not decided |
-| Wallets, addresses, signing | 🚧 design |
-| Transfers and balances | 🚧 design |
-| Leasing a machine | 🚧 design |
-| Holding a lease open | 🚧 design |
-| Getting results back | 🚧 design |
-| Messaging | 🚧 design |
-| Reference docs and examples | 🚧 none yet |
+| Wallets, addresses, signing | ✅ |
+| Canonical block encoding, hashing, proof of work | ✅ verified byte-for-byte against the node |
+| Send, receive, burn | ✅ |
+| Balances, pending, chains, blocks, supply | ✅ |
+| Providers, leases, state chain (read) | ✅ |
+| Published package | 🚧 not yet |
+| Messaging and the account directory | 🚧 not yet |
+| Leasing a machine | 🚧 not yet |
+| Other languages | 🚧 later — TypeScript first |
 
-Separately, and worth saying plainly: **there are no providers online on the
-testnet right now**, so leasing a machine is not something anyone can do today,
-with this SDK or without it. That is a property of the network, not of this
-repository. The node source tracks the live position honestly —
-see [xeprotocol/xe](https://github.com/xeprotocol/xe).
+Separately: **there are no guarantees about provider availability on the
+testnet**, so anything lease-shaped may have nobody to talk to. The node source
+tracks the live position — see [xeprotocol/xe](https://github.com/xeprotocol/xe).
 
-## Using XE today
+## Development
 
-Until this exists, the node binary is the way in. It is one binary that is both
-the daemon and a client, and it covers wallets, transfers, messaging and the
-rest:
+```sh
+npm install
+npm run typecheck
+npm run lint
+npm test              # unit tests, no network needed
+npm run build
+```
 
-- **Source, build instructions and a walkthrough** —
-  [github.com/xeprotocol/xe](https://github.com/xeprotocol/xe)
-- **The HTTP API** this SDK will sit on top of —
-  [`docs/api.md`](https://github.com/xeprotocol/xe/blob/master/docs/api.md)
-- **Architecture, consensus, tokenomics** —
-  [test.network/docs](https://test.network/docs)
+Integration tests run against a real node and **skip with a reason** when none
+is reachable, so `npm test` works offline:
+
+```sh
+npm run test:integration                       # defaults to a public node
+XE_NODE=http://127.0.0.1:8080 npm run test:integration
+```
+
+### Why the vector fixture matters
+
+`test/vectors.json` is generated by the node's own Go implementation. The tests
+assert that this SDK produces **byte-identical** canonical encodings, hashes and
+signatures for every one of them, across two different network ids.
+
+That is not a formality. A block hash commits to the network id, the field
+order, the position of the representative, the memo length byte and the way a
+declared public key is framed. One byte wrong and the network rejects the block
+— so the node, not our reading of it, is the authority.
 
 ## Issues
 
-**Issues are turned off on this repository.** There is no code here to report a
-bug in, and tracking work for it happens elsewhere.
-
-If you have found a problem with XE itself, report it against the node source at
-[xeprotocol/xe](https://github.com/xeprotocol/xe/issues), where there is also a
-paid bug bounty — see [test.network/bounty](https://test.network/bounty).
+**Issues are turned off here.** Report anything about XE itself against the node
+source at [xeprotocol/xe](https://github.com/xeprotocol/xe/issues), where there
+is also a paid bug bounty — see [test.network/bounty](https://test.network/bounty).
 
 **Critical or severe findings** — anything risking funds or the network — go
 privately to `security@xe.network` first, never a public issue.
@@ -119,5 +169,5 @@ privately to `security@xe.network` first, never a public issue.
 
 **Not yet settled.** The node source is GPL-3.0, but a client library carries
 different obligations for the people building on it, so the choice here is being
-made deliberately rather than inherited. It will be set before any code is
+made deliberately rather than inherited. It will be set before the package is
 published, and until then no licence is granted.
