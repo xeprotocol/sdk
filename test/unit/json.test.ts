@@ -26,6 +26,22 @@ describe('lossless JSON', () => {
     expect(parsed.amount).toBe(5n)
   })
 
+  it('parses a float with a long fraction (a certificate score) as a number', () => {
+    // Go prints float64 at up to 17 significant digits. The scanner used to
+    // treat the digits after the point as a fresh integer, quote them, and
+    // hand JSON.parse `0."…"` — every certificate read failed as "not JSON".
+    const out = parseLossless('{"score":0.12345678901234568,"x":1.2345678901234568e-05,"n":1}') as Record<string, unknown>
+    expect(out['score']).toBe(0.12345678901234568)
+    expect(out['x']).toBe(1.2345678901234568e-5)
+  })
+
+  it('leaves a float under a known uint64 key as a number', () => {
+    // The key pattern used to match the integer part alone and quote only
+    // `1`, leaving `.5` dangling after the string.
+    expect(parseLossless('{"duration":1.5}')).toEqual({ duration: 1.5 })
+    expect(parseLossless('{"cost":15.25,"stake":2e3}')).toEqual({ cost: 15.25, stake: 2000 })
+  })
+
   it('does not corrupt strings that merely contain a key name', () => {
     const parsed = parseLossless('{"note":"the amount: 12 was fine"}') as { note: string }
     expect(parsed.note).toBe('the amount: 12 was fine')
