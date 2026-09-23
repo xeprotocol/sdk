@@ -10,6 +10,8 @@
 // Tutorials 1–4 need nothing: the faucet funds the wallet. Leasing (5–6) is
 // paid in XUSD, which the faucet does not hand out, so those run only when
 // XE_LEASE_SEED names a wallet that holds some; otherwise they are skipped.
+// Pending XUSD sent to that wallet is claimed first, so it can be refunded by
+// address alone.
 //
 //   npm run build && npm run examples:live
 //   XE_LEASE_SEED=<hex seed holding XUSD> npm run examples:live
@@ -38,6 +40,43 @@ let failed = 0
 let skipped = 0
 rmSync(out, { recursive: true, force: true })
 
+// Enough for both languages' leasing tutorials (~0.003 XUSD) with headroom.
+const MIN_LEASE_XUSD = 10_000n
+
+/**
+ * Claim anything sent to the leasing wallet and check it can pay. It is refunded
+ * by address alone (the issuer cannot sign for it), so a top-up arrives as a
+ * pending transfer that only this wallet's own key can receive.
+ */
+async function prepareLeaseWallet(seed) {
+  const { Wallet, Xe, fromMicro } = await import('../dist/index.js')
+  const xe = new Xe({ client: process.env['XE_NODE'] ?? 'https://ldn.core.test.network', wallet: Wallet.fromSeedHex(seed) })
+  const claimed = await xe.receiveAll()
+  const deadline = Date.now() + 60_000
+  while ((await xe.spendable('XUSD')) < (await xe.balance('XUSD')) && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 1_000))
+  }
+  const xusd = await xe.spendable('XUSD')
+  console.log(`leasing wallet ${xe.address}: ${fromMicro(xusd)} XUSD spendable (claimed ${claimed.length} pending)`)
+  if (xusd < MIN_LEASE_XUSD) {
+    throw new Error(
+      `leasing wallet ${xe.address} holds ${fromMicro(xusd)} XUSD, needs ${fromMicro(MIN_LEASE_XUSD)} — ` +
+        'refund it with XUSD (after a testnet reset it starts at zero)',
+    )
+  }
+}
+
+let leaseReady = false
+if (leaseSeed) {
+  try {
+    await prepareLeaseWallet(leaseSeed)
+    leaseReady = true
+  } catch (err) {
+    console.log(`FAIL: leasing wallet — ${err.message}`)
+    failed++
+  }
+}
+
 for (const lang of ['typescript', 'javascript']) {
   const cwd = join(out, lang)
   mkdirSync(cwd, { recursive: true })
@@ -45,8 +84,8 @@ for (const lang of ['typescript', 'javascript']) {
   for (const name of readdirSync(dir).filter((f) => f.endsWith('.md')).sort()) {
     for (const [, , file, body] of readFileSync(join(dir, name), 'utf8').matchAll(FENCE)) {
       const label = `${lang}/${name}`
-      if (LEASING.test(name) && !leaseSeed) {
-        console.log(`SKIP: ${label} — leasing needs XUSD; set XE_LEASE_SEED to run it`)
+      if (LEASING.test(name) && !leaseReady) {
+        console.log(`SKIP: ${label} — leasing needs XUSD; ${leaseSeed ? 'the leasing wallet is not ready (above)' : 'set XE_LEASE_SEED to run it'}`)
         skipped++
         continue
       }
