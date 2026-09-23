@@ -2,7 +2,7 @@ import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'coverage/**'] },
+  { ignores: ['dist/**', 'coverage/**', '.examples-check/**', '.examples-run/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -19,7 +19,7 @@ export default tseslint.config(
     rules: { 'no-console': 'off' },
   },
   {
-    files: ['examples/**'],
+    files: ['examples/**', 'scripts/**'],
     languageOptions: {
       globals: { process: 'readonly', console: 'readonly', AbortController: 'readonly' },
     },

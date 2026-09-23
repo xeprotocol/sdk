@@ -33,6 +33,7 @@ jobs:
       - run: npm run lint
       - run: npm run build
       - run: npm test
+      - run: npm run examples:check
 
   browser:
     # The same crypto has to work in a browser: the SDK is for programs that
@@ -65,3 +66,10 @@ jobs:
         env:
           XE_NODE: https://ldn.core.test.network
           XE_FAUCET: https://faucet.test.network
+      # Every tutorial's complete program, run for real. Leasing needs XUSD and
+      # is skipped unless a funded seed is configured.
+      - run: npm run examples:live
+        env:
+          XE_NODE: https://ldn.core.test.network
+          XE_FAUCET: https://faucet.test.network
+          XE_LEASE_SEED: ${{ secrets.XE_LEASE_SEED }}

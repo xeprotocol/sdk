@@ -8,6 +8,7 @@ export type {
   LeaseSegment,
   LeaseState,
   PendingSend,
+  Provider,
   SubmitResult,
   TimekeeperSet,
 } from './client.js'

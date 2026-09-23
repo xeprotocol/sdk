@@ -41,6 +41,12 @@ any node's HTTP API. That means:
 - **Your keys never leave your process.** Nothing is ever handed to a node.
 - **It works in Node and in a browser**, on the same code path.
 
+## Tutorials
+
+**[`examples/`](examples/README.md)** has step-by-step tutorials in TypeScript and
+JavaScript: your first wallet, getting testnet funds, sending, errors and
+retries, renting a machine, and holding a lease open.
+
 ## Quick start
 
 ```ts
@@ -152,7 +158,7 @@ on the ledger before scheduling the next. `cancelLease` withdraws a lease the
 provider has not accepted; `forceSettleLease` reclaims the escrow of one the
 provider never settled.
 
-`examples/hold-lease.mjs` is a complete, runnable version that checks every
+`examples/javascript/hold-lease.mjs` is a complete, runnable version that checks every
 step and prints `PASS:`/`FAIL:` lines.
 
 ## What works today
