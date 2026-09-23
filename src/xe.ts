@@ -253,6 +253,43 @@ export class Xe {
     return { ...result, cost, certificate }
   }
 
+  /**
+   * Open a lease and wait for the provider to accept it, retrying with a fresh
+   * lease if it does not.
+   *
+   * A provider can leave a request unaccepted for good — it is full, or its own
+   * accept attempt failed — and an unaccepted request holds your escrow until
+   * you cancel it. So an unanswered request is cancelled (refunding the escrow)
+   * and re-opened. If the provider accepts just as the cancel goes in, that
+   * lease is used instead.
+   */
+  async rentLease(
+    options: OpenLeaseOptions,
+    retry: { acceptTimeoutMs?: number; attempts?: number } = {},
+  ): Promise<{ lease: LeaseRecord; opened: OpenedLease; attempts: number }> {
+    const attempts = retry.attempts ?? 3
+    let lastError: unknown
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      const opened = await this.openLease(options)
+      try {
+        const lease = await this.waitForLease(opened.hash, ['accepted'], { timeoutMs: retry.acceptTimeoutMs ?? 60_000 })
+        return { lease, opened, attempts: attempt }
+      } catch (err) {
+        lastError = err
+        if (!(err instanceof XeApiError && err.retryable)) throw err
+      }
+      try {
+        await this.cancelLease(opened.hash)
+        await this.waitForLease(opened.hash, ['cancelled'], { timeoutMs: 30_000 })
+      } catch (err) {
+        const lease = await this.client.lease(opened.hash)
+        if (lease.state === 'accepted') return { lease, opened, attempts: attempt }
+        throw err
+      }
+    }
+    throw lastError
+  }
+
   async lease(hash: Hash): Promise<LeaseRecord> {
     return this.client.lease(hash)
   }

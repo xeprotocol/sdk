@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import vectorsJson from '../vectors.json?raw'
 
@@ -10,7 +10,9 @@ import { parseLossless } from '../../src/json.js'
 import { leaseCost } from '../../src/lease.js'
 import { toAddress, toHash, toPublicKey, type Attestation, type Hash, type SignedBlock } from '../../src/types.js'
 import type { LeaseRecord } from '../../src/client.js'
-import type { RenewedLease, Xe } from '../../src/xe.js'
+import { Xe, type RenewedLease } from '../../src/xe.js'
+import { Wallet } from '../../src/wallet.js'
+import { XeApiError } from '../../src/errors.js'
 
 const fixture = parseLossless(vectorsJson) as {
   attestation_vectors: { lease_hash: string; timestamp: bigint; payload_hex: string; public_key: string; signature: string }[]
@@ -163,5 +165,63 @@ describe('holdLease', () => {
     const result = await holdLease(xe, lease.hash, { renewSecs: 1, totalSecs: 10, signal: ac.signal })
     expect(result.reason).toBe('aborted')
     expect(result.renewals).toHaveLength(0)
+  })
+})
+
+describe('rentLease', () => {
+  const opts = { provider: toAddress('c'.repeat(64)), vcpus: 1, memoryMb: 1024, diskGb: 1, durationSecs: 60 }
+  const timeout = () => new XeApiError('still created after timeout', 503, true, null)
+
+  function setup(outcomes: Array<'accept' | 'timeout'>, cancelRace = false) {
+    const xe = new Xe({ client: 'http://node.test', wallet: Wallet.create() })
+    let n = 0
+    const opened: string[] = []
+    const cancelled: string[] = []
+    vi.spyOn(xe, 'openLease').mockImplementation(async () => {
+      const hash = toHash(String(++n).repeat(64).slice(0, 64).replace(/[^0-9a-f]/g, 'a'))
+      opened.push(hash)
+      return { hash, accepted: true, cost: 1n, certificate: {} as never }
+    })
+    vi.spyOn(xe, 'waitForLease').mockImplementation(async (hash, states) => {
+      if (states.includes('cancelled')) return { state: 'cancelled' } as LeaseRecord
+      const outcome = outcomes[opened.indexOf(hash)]
+      if (outcome === 'accept') return { hash, state: 'accepted' } as LeaseRecord
+      throw timeout()
+    })
+    vi.spyOn(xe, 'cancelLease').mockImplementation(async (hash) => {
+      if (cancelRace) throw new Error('lease is accepted; only an unaccepted lease can be cancelled')
+      cancelled.push(hash)
+      return { hash, accepted: true }
+    })
+    vi.spyOn(xe.client, 'lease').mockImplementation(async (hash) => ({ hash, state: 'accepted' }) as LeaseRecord)
+    return { xe, opened, cancelled }
+  }
+
+  it('returns the first accepted lease', async () => {
+    const { xe, cancelled } = setup(['accept'])
+    const r = await xe.rentLease(opts)
+    expect(r.attempts).toBe(1)
+    expect(cancelled).toHaveLength(0)
+  })
+
+  it('cancels an unanswered request (refunding it) and opens a fresh one', async () => {
+    const { xe, opened, cancelled } = setup(['timeout', 'accept'])
+    const r = await xe.rentLease(opts, { acceptTimeoutMs: 1 })
+    expect(r.attempts).toBe(2)
+    expect(cancelled).toEqual([opened[0]])
+    expect(r.opened.hash).toBe(opened[1])
+  })
+
+  it('keeps a lease the provider accepted while the cancel was going in', async () => {
+    const { xe, opened } = setup(['timeout'], true)
+    const r = await xe.rentLease(opts, { acceptTimeoutMs: 1 })
+    expect(r.opened.hash).toBe(opened[0])
+    expect(r.lease.state).toBe('accepted')
+  })
+
+  it('gives up after the attempt budget, having cancelled every request', async () => {
+    const { xe, cancelled } = setup(['timeout', 'timeout'])
+    await expect(xe.rentLease(opts, { acceptTimeoutMs: 1, attempts: 2 })).rejects.toThrow(/timeout/)
+    expect(cancelled).toHaveLength(2)
   })
 })

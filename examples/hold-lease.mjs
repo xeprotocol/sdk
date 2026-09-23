@@ -68,7 +68,7 @@ async function main() {
 
   const provider = await pickProvider()
   const accessKey = Wallet.create() // the key the VM will accept for SSH
-  const opened = await xe.openLease({
+  const { lease: accepted, opened, attempts } = await xe.rentLease({
     provider,
     vcpus: 1,
     memoryMb: 1024,
@@ -76,10 +76,8 @@ async function main() {
     durationSecs: RENEW_SECS,
     accessPubKey: accessKey.publicKey,
   })
-  log(`lease ${opened.hash} opened with ${provider.slice(0, 12)}…, first minute costs ${fromMicro(opened.cost)} XUSD`)
-
-  const accepted = await xe.waitForLease(opened.hash, ['accepted'], { timeoutMs: 180_000 })
-  check(true, 'provider accepted the lease', `started ${nsToIso(accepted.startTime)}, expires ${nsToIso(accepted.effectiveExpiry)}`)
+  log(`lease ${opened.hash} with ${provider.slice(0, 12)}…, first minute costs ${fromMicro(opened.cost)} XUSD`)
+  check(true, 'provider accepted the lease', `attempt ${attempts}, started ${nsToIso(accepted.startTime)}, expires ${nsToIso(accepted.effectiveExpiry)}`)
 
   let stopping = false
   const ac = new AbortController()
