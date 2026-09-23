@@ -220,7 +220,4 @@ privately to `security@xe.network` first, never a public issue.
 
 ## License
 
-**Not yet settled.** The node source is GPL-3.0, but a client library carries
-different obligations for the people building on it, so the choice here is being
-made deliberately rather than inherited. It will be set before the package is
-published, and until then no licence is granted.
+GPL-3.0, the same as the node. See [LICENSE](LICENSE).
