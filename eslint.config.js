@@ -2,7 +2,7 @@ import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'coverage/**', '.examples-check/**'] },
+  { ignores: ['dist/**', 'coverage/**', '.examples-check/**', '.examples-run/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

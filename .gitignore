@@ -5,3 +5,4 @@ coverage/
 .DS_Store
 __screenshots__/
 .examples-check/
+.examples-run/
