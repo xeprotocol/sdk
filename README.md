@@ -109,6 +109,52 @@ try {
 A non-2xx response always throws. An empty list from this SDK means the account
 genuinely has nothing — never that the request failed.
 
+## Renting a machine
+
+A lease escrows XUSD with a provider for a fixed term. To pay only for the time
+you use, keep the term short and **renew it a minute at a time** — nothing beyond
+the current minute is ever escrowed, so if you stop (or your process dies) the
+machine is released within a minute.
+
+```ts
+import { Wallet, Xe, holdLease } from '@xeprotocol/sdk'
+
+const xe = new Xe({
+  client: 'https://ldn.core.test.network',
+  wallet: Wallet.fromSeedHex(process.env.SEED),
+  // Renewals are timed by the network's timekeepers, so the SDK needs to
+  // reach a threshold of them. The state chain names their keys, not their
+  // addresses, so tell it where to look.
+  timekeepers: [
+    'https://ldn.core.test.network',
+    'https://ffm.core.test.network',
+    'https://nyc.core.test.network',
+  ],
+})
+
+const sshKey = Wallet.create() // the key the machine will accept
+const lease = await xe.openLease({
+  provider,                      // an address from xe.client.providers()
+  vcpus: 1, memoryMb: 1024, diskGb: 10,
+  durationSecs: 60,
+  accessPubKey: sshKey.publicKey,
+})
+
+// Renew a minute at a time until the term reaches ten minutes.
+await holdLease(xe, lease.hash, { renewSecs: 60, totalSecs: 600 })
+```
+
+`openLease` prices the lease from the provider's current performance
+certificate, exactly as the ledger will. `renewLease` gathers timekeeper
+attestations, checks them locally, and locks the current oracle epoch's emission
+parameters. `holdLease` renews ahead of each expiry and confirms every extension
+on the ledger before scheduling the next. `cancelLease` withdraws a lease the
+provider has not accepted; `forceSettleLease` reclaims the escrow of one the
+provider never settled.
+
+`examples/hold-lease.mjs` is a complete, runnable version that checks every
+step and prints `PASS:`/`FAIL:` lines.
+
 ## What works today
 
 | Area | Status |
@@ -118,9 +164,10 @@ genuinely has nothing — never that the request failed.
 | Send, receive, burn | ✅ |
 | Balances, pending, chains, blocks, supply | ✅ |
 | Providers, leases, state chain (read) | ✅ |
+| Leasing a machine: open, renew, cancel, force-settle, hold a lease open | ✅ |
+| Reaching a leased machine over SSH | 🚧 not yet |
 | Published package | 🚧 not yet |
 | Messaging and the account directory | 🚧 not yet |
-| Leasing a machine | 🚧 not yet |
 | Other languages | 🚧 later — TypeScript first |
 
 Separately: **there are no guarantees about provider availability on the

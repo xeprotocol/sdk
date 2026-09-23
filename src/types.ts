@@ -62,6 +62,21 @@ export type BlockType =
   | 'multisig_update'
 
 /**
+ * A timekeeper's signed statement of the time, bound to one lease.
+ *
+ * Lease time never comes from the consumer's or the provider's clock: every
+ * attestation-gated block (renew, force-settle, and the provider's accept and
+ * settle) carries a threshold of these, and the ledger takes their lower
+ * median as the authoritative time of the transition.
+ */
+export interface Attestation {
+  publicKey: PublicKey
+  /** Unix nanoseconds, as the timekeeper saw them. */
+  timestamp: bigint
+  signature: string
+}
+
+/**
  * A block, in the shape the canonical encoder consumes.
  *
  * Every uint64 field is a bigint: `timestamp` is unix NANOSECONDS (~1.8e18) and
@@ -81,6 +96,20 @@ export interface Block {
   amount?: bigint
   source?: Hash
   memo?: string
+  /** Lease dimensions. `duration` is seconds. */
+  vcpus?: bigint
+  memoryMb?: bigint
+  diskGb?: bigint
+  duration?: bigint
+  /** The ed25519 key the consumer will reach the VM with. Raw 32 bytes, hex. */
+  accessPubKey?: string
+  /** The provider performance certificate the lease is priced against. */
+  certificateHash?: Hash
+  attestations?: Attestation[]
+  /** Emission params locked from the epoch at the attested time (accept, renew). */
+  lockedR?: bigint
+  lockedPayoutCap?: bigint
+  lockedTwap?: bigint
   /** Declared by the FIRST block on a chain, and by no other. */
   pubKey?: PublicKey
   hash?: Hash

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import { hexToBytes } from '../../src/hex.js'
 import { toHash } from '../../src/types.js'
-import { CHAT_DIFFICULTY, DEFAULT_DIFFICULTY, powHash, solvePow, validatePow } from '../../src/pow.js'
+import { CHAT_DIFFICULTY, DEFAULT_DIFFICULTY, powHash, solvePow, validatePow, wasmPowHash } from '../../src/pow.js'
+import { digestBE, loadHash } from '../../src/pow-fast.js'
 
 const HASH = hexToBytes('e421d0d72568fa47a149c46172a8d168374d2fc00c4f2189a6bbbf946bc673da', 32)
 
@@ -76,4 +77,45 @@ describe('proof of work', () => {
     setTimeout(() => controller.abort(reason), 20)
     await expect(promise).rejects.toThrow('caller changed their mind')
   })
+})
+
+describe('the specialised proof-of-work digest', () => {
+  it('agrees with the reference blake2b on random inputs', () => {
+    const out = new Uint32Array(2)
+    for (let i = 0; i < 2000; i++) {
+      const hash = new Uint8Array(32)
+      crypto.getRandomValues(hash)
+      const n = new Uint32Array(2)
+      crypto.getRandomValues(n)
+      loadHash(hash)
+      digestBE(n[0]!, n[1]!, out)
+      const nonce = (BigInt(n[1]!) << 32n) | BigInt(n[0]!)
+      expect((BigInt(out[0]!) << 32n) | BigInt(out[1]!)).toBe(powHash(nonce, hash))
+    }
+  })
+
+  it('the WebAssembly digest agrees with the reference too', async () => {
+    for (let i = 0; i < 2000; i++) {
+      const hash = new Uint8Array(32)
+      crypto.getRandomValues(hash)
+      const n = new BigUint64Array(1)
+      crypto.getRandomValues(n)
+      expect(await wasmPowHash(n[0]!, hash)).toBe(powHash(n[0]!, hash))
+    }
+    // The node's own vectors include the u64 extremes the i64 boundary could mangle.
+    expect(await wasmPowHash(0xffffffffffffffffn, HASH)).toBe(powHash(0xffffffffffffffffn, HASH))
+  })
+
+  it('solves the block difficulty fast enough for a renewal to land in time', async () => {
+    // A renewal must be proven and land before the lease it extends expires.
+    // ~2M expected attempts; well under a few seconds on the WebAssembly path.
+    const t = performance.now()
+    for (let i = 0; i < 3; i++) {
+      const h = new Uint8Array(32)
+      crypto.getRandomValues(h)
+      const nonce = await solvePow(h)
+      expect(validatePow(h, nonce)).toBe(true)
+    }
+    expect(performance.now() - t).toBeLessThan(30_000)
+  }, 60_000)
 })

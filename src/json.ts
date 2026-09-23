@@ -31,7 +31,7 @@ const U64_KEYS = [
   'pending',
 ] as const
 
-const U64_PATTERN = new RegExp(`"(${U64_KEYS.join('|')})"\\s*:\\s*(-?\\d+)`, 'g')
+const U64_PATTERN = new RegExp(`"(${U64_KEYS.join('|')})"\\s*:\\s*(-?\\d+)(?![\\d.eE])`, 'g')
 
 /**
  * Marker for a number this module quoted on the way in, so the reviver can
@@ -93,9 +93,20 @@ function quoteLongIntegers(text: string): string {
       const digitStart = j
       while (j < text.length && text[j]! >= '0' && text[j]! <= '9') j++
       const digits = j - digitStart
-      const next = text[j]
-      // A fraction or exponent is not an integer; leave it to JSON.parse.
-      const isInteger = next !== '.' && next !== 'e' && next !== 'E'
+      // Consume the whole token: a fraction or exponent left behind would be
+      // rescanned as a fresh integer and quoted mid-number.
+      let isInteger = true
+      if (text[j] === '.') {
+        isInteger = false
+        j++
+        while (j < text.length && text[j]! >= '0' && text[j]! <= '9') j++
+      }
+      if (text[j] === 'e' || text[j] === 'E') {
+        isInteger = false
+        j++
+        if (text[j] === '+' || text[j] === '-') j++
+        while (j < text.length && text[j]! >= '0' && text[j]! <= '9') j++
+      }
       const token = text.slice(i, j)
       out += isInteger && digits >= UNSAFE_DIGITS ? `"${MARK_JSON}${token}"` : token
       i = j

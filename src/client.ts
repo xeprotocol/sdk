@@ -1,6 +1,6 @@
 import { XeApiError, XeTransportError, isRetryable } from './errors.js'
 import { asBigInt, parseLossless, stringifyWithBigInts } from './json.js'
-import type { Address, Asset, Hash, SignedBlock } from './types.js'
+import type { Address, Asset, Attestation, Hash, PublicKey, SignedBlock } from './types.js'
 
 export interface ClientOptions {
   /** Node API base URL, e.g. https://ldn.core.test.network */
@@ -35,6 +35,66 @@ export interface PendingSend {
 export interface SubmitResult {
   hash: Hash
   accepted: true
+}
+
+/** A provider's performance certificate: what a lease is priced against. */
+export interface Certificate {
+  hash: Hash
+  provider: Address
+  /** Price multiplier ×1000 (1000 = 1.0×). */
+  priceMultiplierMilli: bigint
+  /** Unix nanoseconds; 0 means no expiry. */
+  expiresAt: bigint
+  raw: Record<string, unknown>
+}
+
+export interface TimekeeperSet {
+  keys: PublicKey[]
+  threshold: number
+}
+
+/** The emission params a renewal must lock: one oracle epoch. */
+export interface Epoch {
+  epoch: bigint
+  startNs: bigint
+  endNs: bigint
+  /** R_effective ×1000 — what the block calls locked_r. */
+  rEffective: bigint
+  payoutCap: bigint
+  twapMilliUsd: bigint
+}
+
+export type LeaseState = 'created' | 'accepted' | 'settled' | 'cancelled' | 'unfulfilled' | 'expired'
+
+export interface LeaseSegment {
+  renewHash: Hash
+  duration: bigint
+  cost: bigint
+  startTime: bigint
+}
+
+/** The ledger's record of a lease, as any node serves it. */
+export interface LeaseRecord {
+  hash: Hash
+  state: LeaseState
+  consumer: Address
+  provider: Address
+  vcpus: bigint
+  memoryMb: bigint
+  diskGb: bigint
+  /** Base term, seconds. */
+  duration: bigint
+  cost: bigint
+  /** Attested accept time, unix ns. 0 until accepted. */
+  startTime: bigint
+  settled: boolean
+  certificateHash: string
+  renewals: LeaseSegment[]
+  /** Base + every renewal, seconds. */
+  effectiveDuration: bigint
+  /** startTime + effectiveDuration, unix ns. Meaningless until accepted. */
+  effectiveExpiry: bigint
+  raw: Record<string, unknown>
 }
 
 /**
@@ -169,10 +229,22 @@ export class XeClient {
     return unwrapList(raw, 'blocks')
   }
 
-  /** Frontier hash for an account, or `"0"` when the chain is empty. */
+  /**
+   * Frontier hash for an account, or `"0"` when the chain is empty.
+   *
+   * The chain endpoint pages from the OLDEST block, 100 at a time, so the last
+   * entry of an unparameterised read is the frontier only for short chains.
+   * Read the total first, then fetch exactly the last block.
+   */
   async frontier(address: Address): Promise<Hash | '0'> {
-    const blocks = await this.chain(address)
-    if (blocks.length === 0) return '0'
+    const head = await this.request<Record<string, unknown>>(`/accounts/${address}/chain?limit=1`)
+    const total = Number(head['total'] ?? 0)
+    if (!Number.isSafeInteger(total) || total < 0) {
+      throw new XeApiError('chain response had no usable total', 200, false, head)
+    }
+    if (total === 0) return '0'
+    const blocks = await this.chain(address, { offset: total - 1, limit: 1 })
+    if (blocks.length === 0) throw new XeApiError('chain shrank while reading the frontier', 503, true, head)
     const last = blocks[blocks.length - 1] as Record<string, unknown>
     const hash = last['hash']
     if (typeof hash !== 'string') throw new XeApiError('chain entry had no hash', 200, false, last)
@@ -217,8 +289,65 @@ export class XeClient {
     return unwrapList(await this.request<unknown>(`/leases${suffix}`), 'leases')
   }
 
-  async lease(hash: Hash): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>(`/leases/${hash}`)
+  async lease(hash: Hash): Promise<LeaseRecord> {
+    return toLeaseRecord(await this.request<Record<string, unknown>>(`/leases/${hash}`))
+  }
+
+  /** The provider's current certificate. 404 means the provider cannot be leased. */
+  async certificate(provider: Address): Promise<Certificate> {
+    return toCertificate(await this.request<Record<string, unknown>>(`/certificate/${provider}`))
+  }
+
+  async timekeepers(): Promise<TimekeeperSet> {
+    const raw = (await this.statechainValue('sys.timekeepers')) as Record<string, unknown>
+    const value = (raw['value'] ?? raw) as Record<string, unknown>
+    const keys = value['keys']
+    if (!Array.isArray(keys)) throw new XeApiError('sys.timekeepers has no keys', 200, false, raw)
+    return { keys: keys as PublicKey[], threshold: Number(value['threshold']) }
+  }
+
+  async statechainBlock(index: bigint): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(`/statechain/blocks/${index}`)
+  }
+
+  /**
+   * The most recently published oracle epoch.
+   *
+   * Epochs are state-chain `epoch.N` writes, and the oracle is almost always
+   * the most recent writer, so walk back from the tip rather than list the KV
+   * space (which pages lexicographically — epoch.1000 sorts before epoch.999).
+   */
+  async latestEpoch(maxWalk = 64): Promise<Epoch> {
+    let block = await this.statechainTip()
+    for (let i = 0; i < maxWalk; i++) {
+      const ops = Array.isArray(block['ops']) ? (block['ops'] as Record<string, unknown>[]) : []
+      for (let j = ops.length - 1; j >= 0; j--) {
+        const op = ops[j]!
+        if (op['action'] === 'set' && typeof op['key'] === 'string' && op['key'].startsWith('epoch.')) {
+          return toEpoch(op['value'] as Record<string, unknown>)
+        }
+      }
+      const index = asBigInt(block['index'], 'statechain.index')
+      if (index === 0n) break
+      block = await this.statechainBlock(index - 1n)
+    }
+    throw new XeApiError(`no epoch in the last ${maxWalk} state-chain blocks — is the oracle publishing?`, 503, true, null)
+  }
+
+  /**
+   * Ask THIS node to attest the current time for a lease. Only useful when the
+   * node is a timekeeper; any other node's signature will not count.
+   */
+  async requestAttestation(leaseHash: Hash): Promise<Attestation> {
+    const raw = await this.request<Record<string, unknown>>('/attestation/request', {
+      method: 'POST',
+      body: { lease_hash: leaseHash },
+    })
+    return {
+      publicKey: raw['public_key'] as PublicKey,
+      timestamp: asBigInt(raw['timestamp'], 'attestation.timestamp'),
+      signature: raw['signature'] as string,
+    }
   }
 
   async statechainTip(): Promise<Record<string, unknown>> {
@@ -267,5 +396,82 @@ export function toWire(block: SignedBlock): Record<string, unknown> {
   if (block.source) wire['source'] = block.source
   if (block.memo) wire['memo'] = block.memo
   if (block.pubKey) wire['pub_key'] = block.pubKey
+  // The node's JSON omits zero values, and a zero decodes the same as a
+  // missing field, so only non-zero lease fields are written.
+  const u64s = [
+    ['vcpus', block.vcpus],
+    ['memory_mb', block.memoryMb],
+    ['disk_gb', block.diskGb],
+    ['duration', block.duration],
+    ['locked_r', block.lockedR],
+    ['locked_payout_cap', block.lockedPayoutCap],
+    ['locked_twap_milli', block.lockedTwap],
+  ] as const
+  for (const [key, value] of u64s) if (value) wire[key] = value
+  if (block.accessPubKey) wire['access_pub_key'] = block.accessPubKey
+  if (block.certificateHash) wire['certificate_hash'] = block.certificateHash
+  if (block.attestations?.length) {
+    wire['attestations'] = block.attestations.map((a) => ({
+      public_key: a.publicKey,
+      timestamp: a.timestamp,
+      signature: a.signature,
+    }))
+  }
   return wire
+}
+
+const big = (rec: Record<string, unknown>, key: string): bigint =>
+  rec[key] === undefined || rec[key] === null ? 0n : asBigInt(rec[key], key)
+
+export function toCertificate(raw: Record<string, unknown>): Certificate {
+  return {
+    hash: raw['hash'] as Hash,
+    provider: raw['provider'] as Address,
+    priceMultiplierMilli: big(raw, 'price_multiplier_milli'),
+    expiresAt: big(raw, 'expires_at'),
+    raw,
+  }
+}
+
+export function toEpoch(raw: Record<string, unknown>): Epoch {
+  return {
+    epoch: big(raw, 'epoch'),
+    startNs: big(raw, 'start_ns'),
+    endNs: big(raw, 'end_ns'),
+    rEffective: big(raw, 'r_effective'),
+    payoutCap: big(raw, 'payout_cap'),
+    twapMilliUsd: big(raw, 'twap_milli_usd'),
+  }
+}
+
+export function toLeaseRecord(raw: Record<string, unknown>): LeaseRecord {
+  const renewals = (Array.isArray(raw['renewals']) ? (raw['renewals'] as Record<string, unknown>[]) : []).map(
+    (r) => ({
+      renewHash: r['renew_hash'] as Hash,
+      duration: big(r, 'duration'),
+      cost: big(r, 'cost'),
+      startTime: big(r, 'start_time'),
+    }),
+  )
+  const duration = big(raw, 'duration')
+  const effectiveDuration = renewals.reduce((sum, r) => sum + r.duration, duration)
+  const startTime = big(raw, 'start_time')
+  return {
+    hash: (raw['lease_hash'] ?? raw['hash']) as Hash,
+    state: raw['state'] as LeaseState,
+    consumer: raw['consumer'] as Address,
+    provider: raw['provider'] as Address,
+    vcpus: big(raw, 'vcpus'),
+    memoryMb: big(raw, 'memory_mb'),
+    diskGb: big(raw, 'disk_gb'),
+    duration,
+    cost: big(raw, 'cost'),
+    startTime,
+    settled: raw['settled'] === true,
+    certificateHash: (raw['certificate_hash'] as string | undefined) ?? '',
+    renewals,
+    effectiveDuration,
+    effectiveExpiry: startTime + effectiveDuration * 1_000_000_000n,
+    raw,
+  }
 }
