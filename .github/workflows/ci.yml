@@ -33,6 +33,7 @@ jobs:
       - run: npm run lint
       - run: npm run build
       - run: npm test
+      - run: npm run examples:check
 
   browser:
     # The same crypto has to work in a browser: the SDK is for programs that

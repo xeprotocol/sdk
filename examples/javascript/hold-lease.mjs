@@ -7,7 +7,7 @@
 // minute. Exits non-zero on any failed check.
 //
 //   npm run build
-//   XE_SEED=<consumer seed hex> node examples/hold-lease.mjs
+//   XE_SEED=<consumer seed hex> node examples/javascript/hold-lease.mjs
 //
 // Environment:
 //   XE_NODE         node API                       (default https://ldn.core.test.network)
@@ -17,7 +17,7 @@
 //   HOLD_MINUTES    total term                     (default 10)
 //   RENEW_SECS      seconds per renewal            (default 60)
 
-import { Wallet, Xe, fromMicro, holdLease, toAddress } from '../dist/index.js'
+import { Wallet, Xe, fromMicro, holdLease, toAddress } from '../../dist/index.js'
 
 const NODE = process.env.XE_NODE ?? 'https://ldn.core.test.network'
 const TIMEKEEPERS = (
