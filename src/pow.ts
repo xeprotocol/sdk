@@ -1,6 +1,8 @@
 import { blake2b } from '@noble/hashes/blake2b'
 
 import { concatBytes, hexToBytes, readU64be, u64le } from './hex.js'
+import { digestBE, loadHash } from './pow-fast.js'
+import { POW_WASM_BASE64 } from './pow-wasm.js'
 import type { Hash } from './types.js'
 
 /**
@@ -57,23 +59,120 @@ export async function solvePow(hash: Uint8Array | Hash, options: SolveOptions = 
   // Start from a random nonce rather than zero: identical blocks would
   // otherwise grind the identical search, and the first valid nonce would be a
   // deterministic function of the hash.
-  const start = new Uint8Array(8)
+  const start = new Uint32Array(2)
   crypto.getRandomValues(start)
-  let nonce = readU64be(start)
+
+  const wasm = await loadWasm()
+  if (wasm) return solveWasm(wasm, bytes, (BigInt(start[1]!) << 32n) | BigInt(start[0]!), difficulty, interval, options)
+  return solveJs(bytes, start[0]!, start[1]!, difficulty, interval, options)
+}
+
+interface PowWasm {
+  memory: { buffer: ArrayBuffer }
+  search: (start: bigint, count: number, need: bigint) => number
+  digest: (nonce: bigint) => bigint
+}
+
+/** The slice of the WebAssembly API used here; the SDK's lib targets carry no wasm types. */
+interface WasmApi {
+  instantiate(bytes: Uint8Array): Promise<{ instance: { exports: unknown } }>
+}
+
+let wasmPromise: Promise<PowWasm | null> | undefined
+
+/**
+ * The WebAssembly search loop, or null where WebAssembly is unavailable.
+ * Compiled asynchronously: browsers refuse synchronous compilation of all but
+ * tiny modules on the main thread.
+ */
+function loadWasm(): Promise<PowWasm | null> {
+  wasmPromise ??= (async () => {
+    try {
+      const api = (globalThis as { WebAssembly?: WasmApi }).WebAssembly
+      if (!api) return null
+      const bytes = Uint8Array.from(atob(POW_WASM_BASE64), (ch) => ch.charCodeAt(0))
+      const { instance } = await api.instantiate(bytes)
+      return instance.exports as unknown as PowWasm
+    } catch {
+      return null
+    }
+  })()
+  return wasmPromise
+}
+
+async function solveWasm(
+  wasm: PowWasm,
+  hash: Uint8Array,
+  start: bigint,
+  difficulty: bigint,
+  interval: number,
+  options: SolveOptions,
+): Promise<bigint> {
+  // Batches large enough to amortise the call, small enough to yield often.
+  const batch = Math.max(interval, 1 << 16)
+  let nonce = start
+  let attempts = 0
+  for (;;) {
+    checkAborted(options)
+    // Reload every batch: another search may have used the shared memory
+    // while this one was yielded.
+    new Uint8Array(wasm.memory.buffer, 0, 32).set(hash)
+    if (wasm.search(BigInt.asIntN(64, nonce), batch, BigInt.asIntN(64, difficulty))) {
+      return new DataView(wasm.memory.buffer).getBigUint64(64, true)
+    }
+    nonce = (nonce + BigInt(batch)) & U64_MASK
+    attempts += batch
+    options.onProgress?.(attempts)
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  }
+}
+
+async function solveJs(
+  hash: Uint8Array,
+  startLo: number,
+  startHi: number,
+  difficulty: bigint,
+  interval: number,
+  options: SolveOptions,
+): Promise<bigint> {
+  let lo = startLo
+  let hi = startHi
+  // Compare as two 32-bit halves so the hot loop never allocates a BigInt.
+  const needHi = Number(difficulty >> 32n)
+  const needLo = Number(difficulty & 0xffffffffn)
+  const out = new Uint32Array(2)
 
   let attempts = 0
   for (;;) {
-    if (options.signal?.aborted) {
-      throw options.signal.reason instanceof Error
-        ? options.signal.reason
-        : new Error('solvePow: aborted')
+    checkAborted(options)
+    // Reload every batch: the digest state is module-level and another search
+    // may have run while this one was yielded.
+    loadHash(hash)
+    for (let i = 0; i < interval; i++) {
+      digestBE(lo, hi, out)
+      if (out[0]! > needHi || (out[0] === needHi && out[1]! >= needLo)) {
+        return (BigInt(hi) << 32n) | BigInt(lo)
+      }
+      lo = (lo + 1) >>> 0
+      if (lo === 0) hi = (hi + 1) >>> 0
     }
-    if (powHash(nonce, bytes) >= difficulty) return nonce
-    nonce = (nonce + 1n) & U64_MASK
-    attempts++
-    if (attempts % interval === 0) {
-      options.onProgress?.(attempts)
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-    }
+    attempts += interval
+    options.onProgress?.(attempts)
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
   }
+}
+
+function checkAborted(options: SolveOptions): void {
+  if (options.signal?.aborted) {
+    throw options.signal.reason instanceof Error ? options.signal.reason : new Error('solvePow: aborted')
+  }
+}
+
+/** The WebAssembly digest for one nonce, for parity tests. Null without WebAssembly. */
+export async function wasmPowHash(nonce: bigint, hash: Uint8Array): Promise<bigint | null> {
+  const wasm = await loadWasm()
+  if (!wasm) return null
+  new Uint8Array(wasm.memory.buffer, 0, 32).set(hash)
+  const digest = wasm.digest(BigInt.asIntN(64, nonce))
+  return BigInt.asUintN(64, digest)
 }
