@@ -55,6 +55,11 @@ jobs:
     # not a defect in this repository.
     runs-on: ubuntu-latest
     continue-on-error: true
+    # One leasing wallet is shared by every run; two runs at once would race its
+    # chain and reject each other's blocks. Queue them rather than cancel.
+    concurrency:
+      group: testnet-leasing-wallet
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

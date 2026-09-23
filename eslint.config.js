@@ -21,7 +21,7 @@ export default tseslint.config(
   {
     files: ['examples/**', 'scripts/**'],
     languageOptions: {
-      globals: { process: 'readonly', console: 'readonly', AbortController: 'readonly' },
+      globals: { process: 'readonly', console: 'readonly', AbortController: 'readonly', setTimeout: 'readonly' },
     },
     rules: { 'no-console': 'off' },
   },
