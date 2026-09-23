@@ -74,6 +74,28 @@ function toBlock(raw: Record<string, unknown>): Block {
   const memo = str('memo')
   if (memo !== undefined) block.memo = memo
   if (str('pub_key')) block.pubKey = toPublicKey(str('pub_key')!)
+  const fields = [
+    ['vcpus', 'vcpus'],
+    ['memory_mb', 'memoryMb'],
+    ['disk_gb', 'diskGb'],
+    ['duration', 'duration'],
+    ['locked_r', 'lockedR'],
+    ['locked_payout_cap', 'lockedPayoutCap'],
+    ['locked_twap_milli', 'lockedTwap'],
+  ] as const
+  for (const [wire, key] of fields) {
+    const value = num(wire)
+    if (value !== undefined) block[key] = value
+  }
+  if (str('access_pub_key')) block.accessPubKey = str('access_pub_key')!
+  if (str('certificate_hash')) block.certificateHash = toHash(str('certificate_hash')!)
+  if (Array.isArray(raw['attestations'])) {
+    block.attestations = (raw['attestations'] as Record<string, unknown>[]).map((a) => ({
+      publicKey: toPublicKey(a['public_key'] as string),
+      timestamp: BigInt(a['timestamp'] as string | number | bigint),
+      signature: a['signature'] as string,
+    }))
+  }
   return block
 }
 

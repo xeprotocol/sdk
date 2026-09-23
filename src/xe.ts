@@ -1,9 +1,22 @@
-import { XeClient, type ClientOptions, type PendingSend, type SubmitResult } from './client.js'
-import { XeInsufficientFundsError, XeUsageError } from './errors.js'
+import { attestedTime, discoverTimekeepers, gatherAttestations, type Timekeeper } from './attestation.js'
+import {
+  XeClient,
+  type Certificate,
+  type ClientOptions,
+  type Epoch,
+  type LeaseRecord,
+  type LeaseState,
+  type PendingSend,
+  type SubmitResult,
+  type TimekeeperSet,
+  toEpoch,
+} from './client.js'
+import { XeApiError, XeInsufficientFundsError, XeUsageError } from './errors.js'
+import { leaseCost } from './lease.js'
 import { signBlock } from './hash.js'
 import { DEFAULT_DIFFICULTY, solvePow } from './pow.js'
 import { hexToBytes } from './hex.js'
-import type { Address, Asset, Block, Hash, SignedBlock } from './types.js'
+import type { Address, Asset, Attestation, Block, Hash, SignedBlock } from './types.js'
 import type { Wallet } from './wallet.js'
 
 /** Unix nanoseconds. Millisecond resolution is all the platform offers. */
@@ -17,6 +30,37 @@ export interface XeOptions {
   /** Overrides the network id read from the node. Rarely needed. */
   networkId?: string
   onProgress?: (attempts: number) => void
+  /**
+   * Node API URLs to try as timekeepers. `sys.timekeepers` names keys, not
+   * endpoints, so renewals and force-settles need somewhere to ask. Defaults
+   * to the client's own node, which is enough only if it is a timekeeper and
+   * the threshold is 1.
+   */
+  timekeepers?: (XeClient | string)[]
+}
+
+export interface OpenLeaseOptions {
+  provider: Address
+  vcpus: bigint | number
+  memoryMb: bigint | number
+  diskGb: bigint | number
+  durationSecs: bigint | number
+  /** The ed25519 public key (hex, 32 bytes) the VM will accept for SSH. */
+  accessPubKey?: string
+}
+
+export interface OpenedLease extends SubmitResult {
+  cost: bigint
+  certificate: Certificate
+}
+
+export interface RenewedLease extends SubmitResult {
+  lease: Hash
+  cost: bigint
+  durationSecs: bigint
+  /** The attested renewal time the ledger will record, unix ns. */
+  renewTime: bigint
+  epoch: Epoch
 }
 
 export interface SendOptions {
@@ -40,6 +84,8 @@ export class Xe {
   readonly wallet: Wallet
   readonly #networkIdOverride: string | undefined
   readonly #onProgress: ((attempts: number) => void) | undefined
+  readonly #timekeeperCandidates: (XeClient | string)[]
+  #timekeepers: { set: TimekeeperSet; nodes: Timekeeper[] } | undefined
 
   constructor(options: XeOptions) {
     this.client =
@@ -47,6 +93,7 @@ export class Xe {
     this.wallet = options.wallet
     this.#networkIdOverride = options.networkId
     this.#onProgress = options.onProgress
+    this.#timekeeperCandidates = options.timekeepers ?? [this.client]
   }
 
   get address(): Address {
@@ -164,6 +211,219 @@ export class Xe {
     return this.#finish(block)
   }
 
+  // --- leases ---
+
+  /**
+   * Rent a machine: escrow XUSD for a lease against a provider's current
+   * certificate. The provider's node decides whether to accept; nothing is
+   * reserved until it does. Use `waitForLease` to see which way it went.
+   */
+  async openLease(options: OpenLeaseOptions): Promise<OpenedLease> {
+    const dims = {
+      vcpus: BigInt(options.vcpus),
+      memoryMb: BigInt(options.memoryMb),
+      diskGb: BigInt(options.diskGb),
+    }
+    const duration = BigInt(options.durationSecs)
+    if (options.provider === this.address) throw new XeUsageError('openLease: cannot lease from yourself')
+    const certificate = await this.client.certificate(options.provider)
+    if (certificate.expiresAt !== 0n && certificate.expiresAt <= nowNs()) {
+      throw new XeUsageError(`openLease: provider certificate expired at ${certificate.expiresAt}`)
+    }
+    const cost = leaseCost(dims, duration, certificate.priceMultiplierMilli)
+    const { current, previous } = await this.#position('XUSD', cost)
+
+    const block: Block = {
+      type: 'lease',
+      account: this.address,
+      previous,
+      balance: current - cost,
+      timestamp: nowNs(),
+      asset: 'XUSD',
+      destination: options.provider,
+      amount: cost,
+      vcpus: dims.vcpus,
+      memoryMb: dims.memoryMb,
+      diskGb: dims.diskGb,
+      duration,
+      certificateHash: certificate.hash,
+      ...(options.accessPubKey ? { accessPubKey: options.accessPubKey } : {}),
+    }
+    const result = await this.#finish(block)
+    return { ...result, cost, certificate }
+  }
+
+  async lease(hash: Hash): Promise<LeaseRecord> {
+    return this.client.lease(hash)
+  }
+
+  /**
+   * Poll a lease until it reaches one of `states`. A lease that lands in a
+   * terminal state you did not ask for fails fast rather than timing out.
+   */
+  async waitForLease(
+    hash: Hash,
+    states: LeaseState[],
+    options: { timeoutMs?: number; intervalMs?: number } = {},
+  ): Promise<LeaseRecord> {
+    const deadline = Date.now() + (options.timeoutMs ?? 120_000)
+    const terminal: LeaseState[] = ['settled', 'cancelled', 'unfulfilled', 'expired']
+    let last: LeaseRecord | undefined
+    for (;;) {
+      try {
+        last = await this.client.lease(hash)
+        if (states.includes(last.state)) return last
+        if (terminal.includes(last.state)) {
+          throw new XeUsageError(`lease ${hash.slice(0, 12)} ended ${last.state} while waiting for ${states.join('|')}`)
+        }
+      } catch (err) {
+        // Not yet known to this node — it has not synced the lease block.
+        if (!(err instanceof XeApiError && err.status === 404)) throw err
+      }
+      if (Date.now() >= deadline) {
+        throw new XeApiError(
+          `lease ${hash.slice(0, 12)} still ${last?.state ?? 'unknown'} after timeout waiting for ${states.join('|')}`,
+          503,
+          true,
+          last?.raw ?? null,
+        )
+      }
+      await sleep(options.intervalMs ?? 1_000)
+    }
+  }
+
+  /**
+   * Extend an accepted lease in place by `durationSecs`.
+   *
+   * The extension is priced at the provider's CURRENT certificate, timed by a
+   * threshold of timekeeper attestations, and locks the emission params of the
+   * epoch in force at that attested time. The VM is not touched: its expiry
+   * simply moves. Must land before the current expiry — a lease that has run
+   * out cannot be revived.
+   */
+  async renewLease(leaseHash: Hash, durationSecs: bigint | number): Promise<RenewedLease> {
+    const duration = BigInt(durationSecs)
+    const lease = await this.client.lease(leaseHash)
+    if (lease.consumer !== this.address) throw new XeUsageError('renewLease: only the consumer can renew a lease')
+    if (lease.state !== 'accepted' || lease.settled) {
+      throw new XeUsageError(`renewLease: lease is ${lease.state}, only an accepted lease can be renewed`)
+    }
+    const certificate = await this.client.certificate(lease.provider)
+    const cost = leaseCost(lease, duration, certificate.priceMultiplierMilli)
+
+    const attestations = await this.#attest(leaseHash)
+    const renewTime = attestedTime(attestations)
+    if (renewTime >= lease.effectiveExpiry) {
+      throw new XeUsageError(`renewLease: lease expired at ${lease.effectiveExpiry} before the renewal was attested`)
+    }
+    if (certificate.expiresAt !== 0n && renewTime > certificate.expiresAt) {
+      throw new XeUsageError('renewLease: the provider certificate has expired — the provider is not accepting renewals')
+    }
+    const epoch = await this.#epochAt(renewTime)
+    const { current, previous } = await this.#position('XUSD', cost)
+
+    const block: Block = {
+      type: 'lease_renew',
+      account: this.address,
+      previous,
+      balance: current - cost,
+      timestamp: nowNs(),
+      asset: 'XUSD',
+      source: leaseHash,
+      amount: cost,
+      duration,
+      certificateHash: certificate.hash,
+      lockedR: epoch.rEffective,
+      lockedPayoutCap: epoch.payoutCap,
+      lockedTwap: epoch.twapMilliUsd,
+      attestations,
+    }
+    const result = await this.#finish(block)
+    return { ...result, lease: leaseHash, cost, durationSecs: duration, renewTime, epoch }
+  }
+
+  /** Withdraw a lease the provider has not accepted yet. Refunds the escrow. */
+  async cancelLease(leaseHash: Hash): Promise<SubmitResult> {
+    const lease = await this.client.lease(leaseHash)
+    if (lease.consumer !== this.address) throw new XeUsageError('cancelLease: not your lease')
+    if (lease.state !== 'created') {
+      throw new XeUsageError(`cancelLease: lease is ${lease.state}; only an unaccepted lease can be cancelled`)
+    }
+    const { current, previous } = await this.#position('XUSD', 0n)
+    return this.#finish({
+      type: 'lease_cancel',
+      account: this.address,
+      previous,
+      balance: current + lease.cost,
+      timestamp: nowNs(),
+      asset: 'XUSD',
+      source: leaseHash,
+    })
+  }
+
+  /**
+   * Reclaim the whole escrow of an accepted lease the provider never settled.
+   * Valid only once the attested time is past expiry + settle grace + the
+   * force-settle gap; before that the node rejects it.
+   */
+  async forceSettleLease(leaseHash: Hash): Promise<SubmitResult> {
+    const lease = await this.client.lease(leaseHash)
+    if (lease.consumer !== this.address) throw new XeUsageError('forceSettleLease: not your lease')
+    const escrow = lease.renewals.reduce((sum, r) => sum + r.cost, lease.cost)
+    const attestations = await this.#attest(leaseHash)
+    const { current, previous } = await this.#position('XUSD', 0n)
+    return this.#finish({
+      type: 'lease_force_settle',
+      account: this.address,
+      previous,
+      balance: current + escrow,
+      timestamp: nowNs(),
+      asset: 'XUSD',
+      source: leaseHash,
+      attestations,
+    })
+  }
+
+  async timekeepers(): Promise<{ set: TimekeeperSet; nodes: Timekeeper[] }> {
+    if (!this.#timekeepers) {
+      const set = await this.client.timekeepers()
+      this.#timekeepers = { set, nodes: await discoverTimekeepers(set, this.#timekeeperCandidates) }
+    }
+    return this.#timekeepers
+  }
+
+  async #attest(leaseHash: Hash): Promise<Attestation[]> {
+    const tk = await this.timekeepers()
+    return gatherAttestations(leaseHash, tk.set, tk.nodes)
+  }
+
+  /**
+   * The epoch the ledger will check a renewal's locked params against: the
+   * newest one that had started by the attested time. Usually the latest; if
+   * the oracle has just published one that starts later, step back.
+   */
+  async #epochAt(at: bigint): Promise<Epoch> {
+    let epoch = await this.client.latestEpoch()
+    for (let i = 0; i < 4 && epoch.startNs > at && epoch.epoch > 0n; i++) {
+      const raw = (await this.client.statechainValue(`epoch.${epoch.epoch - 1n}`)) as Record<string, unknown>
+      epoch = toEpoch((raw['value'] ?? raw) as Record<string, unknown>)
+    }
+    if (epoch.startNs > at) throw new XeApiError('no oracle epoch covers the attested time yet', 503, true, null)
+    return epoch
+  }
+
+  /** The account's frontier and balance in one asset, checked against a spend. */
+  async #position(asset: Asset, spend: bigint): Promise<{ current: bigint; previous: Hash | '0' }> {
+    const [balances, previous] = await Promise.all([
+      this.client.balances(this.address),
+      this.client.frontier(this.address),
+    ])
+    if (previous === '0') throw new XeUsageError('account is not open yet — receive funds first')
+    const current = balances.balances[asset] ?? 0n
+    if (current < spend) throw new XeInsufficientFundsError(asset, current, spend)
+    return { current, previous }
+  }
+
   /** Sign, prove and submit. Exposed for callers building a block by hand. */
   async submit(block: Block): Promise<SubmitResult> {
     return this.#finish(block)
@@ -180,5 +440,7 @@ export class Xe {
     return this.client.submitBlock(complete)
   }
 }
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 export type { Hash }

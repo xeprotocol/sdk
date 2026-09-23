@@ -30,8 +30,30 @@ const MAX_MEMO_BYTES = 64
 /** Memo rides only on send and burn. Every other type rejects it outright. */
 const MEMO_TYPES = new Set<BlockType>(['send', 'burn'])
 
-/** Types this SDK can currently encode. The lease family lands separately. */
-const SUPPORTED = new Set<BlockType>(['send', 'receive', 'burn'])
+/** Types this SDK can encode. Genesis, mint and multisig are not client operations. */
+const SUPPORTED = new Set<BlockType>([
+  'send',
+  'receive',
+  'burn',
+  'lease',
+  'lease_accept',
+  'lease_settle',
+  'lease_cancel',
+  'lease_force_settle',
+  'lease_renew',
+])
+
+/**
+ * Types whose hash also binds the certificate hash and the attestation set.
+ * Note lease_cancel is NOT one of them: it carries neither.
+ */
+const LEASE_AUX_TYPES = new Set<BlockType>([
+  'lease',
+  'lease_accept',
+  'lease_settle',
+  'lease_force_settle',
+  'lease_renew',
+])
 
 function assetField(asset: string): Uint8Array {
   const bytes = new TextEncoder().encode(asset)
@@ -92,7 +114,7 @@ export function marshalCanonical(block: Block): Uint8Array {
   if (typeByte === undefined) throw new XeUsageError(`unknown block type: ${block.type}`)
   if (!SUPPORTED.has(block.type)) {
     throw new XeUsageError(
-      `${block.type} blocks are not encodable by this SDK yet — send, receive and burn are`,
+      `${block.type} blocks are not encodable by this SDK — it builds transfers and the lease family`,
     )
   }
   if (block.memo && !MEMO_TYPES.has(block.type)) {
@@ -108,6 +130,10 @@ export function marshalCanonical(block: Block): Uint8Array {
     u64be(block.timestamp),
   )
 
+  const source = (): Uint8Array =>
+    addressField(required(block.source, 'source', block.type), 'source')
+  const u64 = (value: bigint | undefined): Uint8Array => u64be(value ?? 0n)
+
   let tail: Uint8Array
   switch (block.type) {
     case 'send':
@@ -121,6 +147,43 @@ export function marshalCanonical(block: Block): Uint8Array {
       break
     case 'burn':
       tail = u64be(required(block.amount, 'amount', block.type))
+      break
+    case 'lease':
+      tail = concatBytes(
+        addressField(required(block.destination, 'destination', block.type), 'destination'),
+        u64(block.amount),
+        u64(block.vcpus),
+        u64(block.memoryMb),
+        u64(block.diskGb),
+        u64(block.duration),
+        addressField(block.accessPubKey, 'accessPubKey'),
+      )
+      break
+    case 'lease_accept':
+      tail = concatBytes(
+        source(),
+        u64(block.amount),
+        u64(block.lockedR),
+        u64(block.lockedPayoutCap),
+        u64(block.lockedTwap),
+      )
+      break
+    case 'lease_settle':
+      tail = concatBytes(source(), u64(block.amount))
+      break
+    case 'lease_cancel':
+    case 'lease_force_settle':
+      tail = source()
+      break
+    case 'lease_renew':
+      tail = concatBytes(
+        source(),
+        u64(block.amount),
+        u64(block.duration),
+        u64(block.lockedR),
+        u64(block.lockedPayoutCap),
+        u64(block.lockedTwap),
+      )
       break
     default:
       throw new XeUsageError(`unreachable: unsupported type ${block.type}`)
@@ -147,14 +210,28 @@ function lenPrefixed(value: string): Uint8Array {
  * still be bound to the hash, so a relay cannot rewrite them while the
  * signature still verifies.
  *
- * Today that is the account public-key declaration. Note the key is framed as
- * its ASCII hex CHARACTERS, not the decoded bytes — and the section is absent
- * entirely on a non-opening block, so those hash exactly as they did before
- * key declaration existed.
+ * That is the account public-key declaration and, on a lease-family block,
+ * the certificate hash and the timekeeper attestations. Note the key is framed
+ * as its ASCII hex CHARACTERS, not the decoded bytes — and the section is
+ * absent entirely on a non-opening block, so those hash exactly as they did
+ * before key declaration existed.
  */
 export function marshalAux(block: Block): Uint8Array {
-  if (!block.pubKey) return new Uint8Array(0)
-  return concatBytes(lenPrefixed(AUX_TAG_ACCOUNT_PUBKEY), lenPrefixed(block.pubKey))
+  const parts: Uint8Array[] = []
+  if (block.pubKey) parts.push(lenPrefixed(AUX_TAG_ACCOUNT_PUBKEY), lenPrefixed(block.pubKey))
+  if (LEASE_AUX_TYPES.has(block.type)) {
+    // The attestation SET is bound, not its order: sorting by key means a relay
+    // reordering them changes nothing, while adding, dropping or swapping one
+    // changes the hash.
+    const atts = [...(block.attestations ?? [])].sort((a, b) =>
+      a.publicKey < b.publicKey ? -1 : a.publicKey > b.publicKey ? 1 : 0,
+    )
+    parts.push(lenPrefixed(block.certificateHash ?? ''), u64be(BigInt(atts.length)))
+    for (const a of atts) {
+      parts.push(lenPrefixed(a.publicKey), u64be(BigInt.asUintN(64, a.timestamp)), lenPrefixed(a.signature))
+    }
+  }
+  return concatBytes(...parts)
 }
 
 export const CANONICAL_SIZES = {
@@ -163,4 +240,10 @@ export const CANONICAL_SIZES = {
   receive: 154,
   /** 131 + memo bytes */
   burn: 131,
+  lease: 226,
+  lease_accept: 186,
+  lease_settle: 162,
+  lease_cancel: 154,
+  lease_force_settle: 154,
+  lease_renew: 194,
 } as const

@@ -128,14 +128,22 @@ describe('XeClient', () => {
 
   describe('frontier', () => {
     it('is "0" for an account with no blocks', async () => {
-      const { c } = client([{ status: 200, body: '[]' }])
+      const { c } = client([{ status: 200, body: '{"address":"x","total":0,"blocks":[]}' }])
       await expect(c.frontier(ADDR)).resolves.toBe('0')
     })
 
-    it('is the last block hash otherwise', async () => {
+    it('is the LAST block of a chain longer than one page', async () => {
+      // The chain endpoint pages from the oldest block, 100 at a time. Taking
+      // the last entry of an unparameterised read returned block 100 of a
+      // 250-block chain — a stale previous every write would be rejected for.
       const h = 'd'.repeat(64)
-      const { c } = client([{ status: 200, body: `[{"hash":"${'e'.repeat(64)}"},{"hash":"${h}"}]` }])
+      const { c, calls } = client([
+        { status: 200, body: `{"address":"x","total":250,"blocks":[{"hash":"${'e'.repeat(64)}"}]}` },
+        { status: 200, body: `{"address":"x","total":250,"blocks":[{"hash":"${h}"}]}` },
+      ])
       await expect(c.frontier(ADDR)).resolves.toBe(h)
+      expect(calls[1]).toContain('offset=249')
+      expect(calls[1]).toContain('limit=1')
     })
   })
 
@@ -195,7 +203,7 @@ describe('remaining read endpoints', () => {
     ['/supply', (c) => c.supply(), '{"XE":{"total":42}}', { XE: { total: 42n } }],
     ['/blocks/{hash}', (c) => c.block(toHash('a'.repeat(64))), '{"hash":"x"}', { hash: 'x' }],
     ['/leases', (c) => c.leases(), '{"leases":[{"h":1}]}', [{ h: 1 }]],
-    ['/leases/{hash}', (c) => c.lease(toHash('b'.repeat(64))), '{"state":"settled"}', { state: 'settled' }],
+    ['/leases/{hash}', async (c) => (await c.lease(toHash('b'.repeat(64)))).state, '{"state":"settled"}', 'settled'],
     ['/statechain/tip', (c) => c.statechainTip(), '{"index":9}', { index: 9 }],
     ['/statechain/kv/{key}', (c) => c.statechainValue('sys.timekeepers'), '{"keys":[]}', { keys: [] }],
     ['/accounts/{a}/chain', (c) => c.chain(ADDR), '{"blocks":[{"i":1}]}', [{ i: 1 }]],

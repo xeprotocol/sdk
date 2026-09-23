@@ -87,8 +87,8 @@ describe('canonical encoding', () => {
 
   it('refuses block types it cannot yet encode, rather than guessing', () => {
     expect(() =>
-      marshalCanonical({ type: 'lease', account: ADDR, previous: HASH, balance: 1n, timestamp: 2n, asset: 'XUSD' }),
-    ).toThrow(/not encodable by this SDK yet/)
+      marshalCanonical({ type: 'mint', account: ADDR, previous: HASH, balance: 1n, timestamp: 2n, asset: 'XUSD' }),
+    ).toThrow(/not encodable by this SDK/)
   })
 })
 
