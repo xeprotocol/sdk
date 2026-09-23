@@ -116,8 +116,18 @@ describe('XeClient', () => {
     })
 
     it('accepts a wrapped array', async () => {
-      const { c } = client([{ status: 200, body: '{"providers":[{"a":1}]}' }])
-      await expect(c.providers()).resolves.toEqual([{ a: 1 }])
+      const { c } = client([{ status: 200, body: '{"providers":[{"account":"a"}]}' }])
+      const [p] = await c.providers()
+      expect(p?.account).toBe('a')
+    })
+
+    it('types a provider advertisement, uint64s as bigint', async () => {
+      const body =
+        '[{"account":"' + 'f'.repeat(64) + '","vcpus":4,"memory_mb":8192,"disk_gb":50,' +
+        '"max_concurrent_leases":5,"used_vcpus":1,"used_memory_mb":1024,"used_disk_gb":1,"active_leases":1}]'
+      const { c } = client([{ status: 200, body }])
+      const [p] = await c.providers()
+      expect(p).toMatchObject({ vcpus: 4n, memoryMb: 8192n, diskGb: 50n, usedVcpus: 1n, activeLeases: 1n })
     })
 
     it('treats a null body as empty', async () => {

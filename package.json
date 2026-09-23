@@ -22,12 +22,14 @@
   "sideEffects": false,
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run test/unit",
     "test:watch": "vitest test/unit",
     "test:integration": "vitest run test/integration",
-    "test:all": "vitest run"
+    "test:all": "vitest run",
+    "examples:check": "node scripts/check-examples.mjs"
   },
   "dependencies": {
     "@noble/curves": "^1.6.0",

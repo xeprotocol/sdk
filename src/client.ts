@@ -37,6 +37,20 @@ export interface SubmitResult {
   accepted: true
 }
 
+/** A provider's advertised capacity, as gossiped across the network. */
+export interface Provider {
+  account: Address
+  vcpus: bigint
+  memoryMb: bigint
+  diskGb: bigint
+  maxConcurrentLeases: bigint
+  usedVcpus: bigint
+  usedMemoryMb: bigint
+  usedDiskGb: bigint
+  activeLeases: bigint
+  raw: Record<string, unknown>
+}
+
 /** A provider's performance certificate: what a lease is priced against. */
 export interface Certificate {
   hash: Hash
@@ -280,8 +294,11 @@ export class XeClient {
     return this.request<Record<string, unknown>>('/supply')
   }
 
-  async providers(): Promise<unknown[]> {
-    return unwrapList(await this.request<unknown>('/providers'), 'providers')
+  /** Providers currently advertising capacity. Lease one with a current certificate. */
+  async providers(): Promise<Provider[]> {
+    return unwrapList(await this.request<unknown>('/providers'), 'providers').map((p) =>
+      toProvider(p as Record<string, unknown>),
+    )
   }
 
   async leases(state?: string): Promise<unknown[]> {
@@ -422,6 +439,21 @@ export function toWire(block: SignedBlock): Record<string, unknown> {
 
 const big = (rec: Record<string, unknown>, key: string): bigint =>
   rec[key] === undefined || rec[key] === null ? 0n : asBigInt(rec[key], key)
+
+export function toProvider(raw: Record<string, unknown>): Provider {
+  return {
+    account: raw['account'] as Address,
+    vcpus: big(raw, 'vcpus'),
+    memoryMb: big(raw, 'memory_mb'),
+    diskGb: big(raw, 'disk_gb'),
+    maxConcurrentLeases: big(raw, 'max_concurrent_leases'),
+    usedVcpus: big(raw, 'used_vcpus'),
+    usedMemoryMb: big(raw, 'used_memory_mb'),
+    usedDiskGb: big(raw, 'used_disk_gb'),
+    activeLeases: big(raw, 'active_leases'),
+    raw,
+  }
+}
 
 export function toCertificate(raw: Record<string, unknown>): Certificate {
   return {
