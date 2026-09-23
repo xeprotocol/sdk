@@ -18,4 +18,11 @@ export default tseslint.config(
     files: ['test/**', 'scripts/**'],
     rules: { 'no-console': 'off' },
   },
+  {
+    files: ['examples/**'],
+    languageOptions: {
+      globals: { process: 'readonly', console: 'readonly', AbortController: 'readonly' },
+    },
+    rules: { 'no-console': 'off' },
+  },
 )
