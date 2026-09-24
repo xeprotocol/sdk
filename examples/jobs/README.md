@@ -1,11 +1,16 @@
-# Jobs — proposed API, written usage-first
+# Jobs
 
-> **Status: design draft. Nothing here runs yet.** These five programs are written
-> against an API that does not exist so that the API can be built backwards from
-> how it reads. Once it is built they become tutorials 7–11 (TypeScript and
-> JavaScript), type-checked by `examples:check` and run by `examples:live` like the
-> others. Until then they are deliberately outside the tutorial `.md` files, so CI
-> ignores them.
+> **Status: working on the public testnet.** The API was designed usage-first:
+> these five programs were written before it existed, and it was built until they
+> ran. `examples:check` type-checks all five against the SDK; `examples:live` runs
+> 01 and 03 (the others hold machines for many minutes and are run by hand). They
+> become step-by-step tutorials 7–11 next.
+>
+> Run one from a checkout of this repository after `npm install && npm run build`,
+> with a funded `wallet.seed` beside it:
+> ```sh
+> node examples/jobs/01-hello-world.ts
+> ```
 
 A **job** is: rent a machine, put your code on it, run it, stream its output,
 bring the results home, and give the machine back — paying one minute at a time
@@ -19,7 +24,7 @@ while it runs.
 | 4 | [`04-train-a-model.ts`](04-train-a-model.ts) | a long job: setup step, live progress, many renewals at a locked price, ended by its budget |
 | 5 | [`05-failing-job.ts`](05-failing-job.ts) | every way a job can end badly (including running out of money or being priced out) and proof the machine is released each time |
 
-## The API these programs assume
+## The API
 
 Everything job-related lives in a Node-only entry point, `@xeprotocol/sdk/jobs`
 (it speaks SSH, which browsers cannot), so the main `@xeprotocol/sdk` stays
@@ -106,10 +111,22 @@ spreading load) still needs design. Pass `provider` if the choice matters.
 - Generates a fresh SSH access key per job, signs it into the lease, and throws
   it away after — you never handle a key.
 - Reaches the machine through the network's SSH gateway (username = lease hash,
-  key = the lease's access key). No node of your own needed.
-- Runs everything in a fresh job directory; `collect` is relative to it.
+  key = the lease's access key), then logs in to the machine's own SSH server
+  through it, end to end. No node of your own needed. Pass `gateway: 'host:port'`
+  to use another; the default is the public testnet's.
+- Runs everything in a fresh job directory (`/root/job`); `collect` is relative
+  to it. Each step runs in its own process session, so a timeout, abort or limit
+  stops the whole process tree, not just the shell.
+- Queues writes from one `Xe`, so several jobs can run at once from one wallet.
+  Use one `Xe` per wallet: two instances for the same wallet are not coordinated.
 
-## Open questions this draft takes a position on
+## The machines
+
+Testnet machines run Ubuntu 24.04 with Python 3.12, `curl` and `git`, as root,
+with outbound internet. There is no `pip` or compiler: install what you need
+with `apt-get` in `setup` (as program 4 does).
+
+## Design positions
 
 - **Arbitrary code** (you run any shell) rather than pinned workloads.
 - **Results convention**: a directory (`out/` by default) the SDK brings home,
@@ -121,7 +138,3 @@ spreading load) still needs design. Pass `provider` if the choice matters.
   proves it.
 - **Renewals keep the opening price** unless `maxPricePerMinute` allows more;
   a job needs a `budget` or a `timeoutSecs`.
-
-Unverified until the first spike: whether the machines have outbound internet
-(programs 2 and 4 need it; 1, 3 and 5 do not), and what is installed on the
-image (the programs assume `python3` and `curl`).

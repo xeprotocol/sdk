@@ -162,10 +162,29 @@ provider never settled.
 step and prints `PASS:`/`FAIL:` lines.
 
 **Prices.** You sign the exact amount of every lease and renewal, so nobody can
-charge you more than you signed for. But today the SDK signs whatever the
-provider currently asks, renewals included. **[Budgets and prices](docs/budgets.md)**
-describes the price ceiling, the price lock on renewals and the total budget
-that come next.
+charge you more than you signed for. On top of that the SDK refuses to sign a
+price you did not agree to: a price ceiling, renewals held at the price the lease
+opened at, and a total budget. See **[Budgets and prices](docs/budgets.md)**.
+
+## Running a job
+
+`@xeprotocol/sdk/jobs` (Node only) runs your code on a rented machine and brings
+the results home, holding the lease a minute at a time while it runs:
+
+```ts
+import { runJob } from '@xeprotocol/sdk/jobs'
+
+const job = await runJob(xe, {
+  machine: { vcpus: 1, memoryMb: 1024, diskGb: 1 },
+  files: { 'main.py': 'print("hello")' },
+  run: 'python3 main.py',
+  budget: toMicro('0.01'),
+})
+console.log(job.status, job.stdout, fromMicro(job.paid))
+```
+
+Five complete programs, including every way a job can fail, are in
+[`examples/jobs/`](examples/jobs/README.md).
 
 ## What works today
 
@@ -177,7 +196,8 @@ that come next.
 | Balances, pending, chains, blocks, supply | ✅ |
 | Providers, leases, state chain (read) | ✅ |
 | Leasing a machine: open, renew, cancel, force-settle, hold a lease open | ✅ |
-| Reaching a leased machine over SSH | 🚧 not yet |
+| Price ceiling, renewal price lock, budgets, quotes | ✅ |
+| Jobs: run code on a leased machine and collect results (Node) | ✅ through the testnet SSH gateway |
 | Published package | 🚧 not yet |
 | Messaging and the account directory | 🚧 not yet |
 | Other languages | 🚧 later — TypeScript first |

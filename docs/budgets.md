@@ -1,8 +1,8 @@
 # Budgets and prices — never pay more than you meant to
 
-> **Status: design draft.** This page describes price protection the SDK is
-> about to gain. Nothing on it is implemented yet. The job examples in
-> [`examples/jobs/`](../examples/jobs/README.md) are written against it.
+> Everything on this page works on the public testnet. The job examples in
+> [`examples/jobs/`](../examples/jobs/README.md) use it, and
+> `05-failing-job.ts` checks the budget and ceiling live.
 
 Renting a machine on XE is paid in **XUSD**, a minute at a time. This page covers
 what you pay, which controls stop you paying more, and what happens when one of
