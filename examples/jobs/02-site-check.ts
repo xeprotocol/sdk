@@ -5,14 +5,17 @@
 // total), the median and worst time. Each provider is a different vantage
 // point, so the table shows how the site looks from each.
 //
+// Starts by quoting every provider's price for the machine, and gives each job
+// its own budget: every provider sends its own bill.
+//
 // The job's result is its stdout — one JSON line per request — so nothing is
 // uploaded or collected. Needs the machines to have outbound internet.
 //
 //   node 02-site-check.ts https://example.com 20
 
 import { readFileSync } from 'node:fs'
-import { Wallet, Xe, fromMicro } from '@xeprotocol/sdk'
-import { leasableProviders, runJob } from '@xeprotocol/sdk/jobs'
+import { Wallet, Xe, fromMicro, toMicro } from '@xeprotocol/sdk'
+import { runJob } from '@xeprotocol/sdk/jobs'
 
 const URL = process.argv[2] ?? 'https://example.com'
 const SAMPLES = Number(process.argv[3] ?? 10)
@@ -31,14 +34,17 @@ const FORMAT =
 interface Sample { code: number; ip: string; dns: number; connect: number; tls: number; firstByte: number; total: number; bytes: number }
 
 const machine = { vcpus: 1, memoryMb: 512, diskGb: 1 }
-const providers = await leasableProviders(xe, machine)
-console.log(`checking ${URL} ×${SAMPLES} from ${providers.length} provider(s)…`)
+const quotes = await xe.quote(machine)
+for (const q of quotes) console.log(`${q.provider.slice(0, 12)}…  ${fromMicro(q.pricePerMinute)} XUSD/min`)
+console.log(`checking ${URL} ×${SAMPLES} from ${quotes.length} provider(s)…`)
 
 const jobs = await Promise.all(
-  providers.map((provider) =>
+  quotes.map((q) =>
     runJob(xe, {
       machine,
-      provider,
+      provider: q.provider,
+      maxPricePerMinute: q.pricePerMinute, // the price just quoted, and no more
+      budget: toMicro('0.01'),
       env: { URL, SAMPLES: String(SAMPLES) },
       run: `for i in $(seq "$SAMPLES"); do curl -s -o /dev/null --max-time 15 -w '${FORMAT}' "$URL"; sleep 0.5; done`,
       timeoutSecs: 300,

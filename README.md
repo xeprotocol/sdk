@@ -161,6 +161,12 @@ provider never settled.
 `examples/javascript/hold-lease.mjs` is a complete, runnable version that checks every
 step and prints `PASS:`/`FAIL:` lines.
 
+**Prices.** You sign the exact amount of every lease and renewal, so nobody can
+charge you more than you signed for. But today the SDK signs whatever the
+provider currently asks, renewals included. **[Budgets and prices](docs/budgets.md)**
+describes the price ceiling, the price lock on renewals and the total budget
+that come next.
+
 ## What works today
 
 | Area | Status |

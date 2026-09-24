@@ -1,4 +1,4 @@
-// 5. A job that goes wrong — on purpose, five ways.
+// 5. A job that goes wrong — on purpose, eight ways.
 //
 // Each case checks two things: that the SDK reports the failure honestly, and
 // that the machine is released (the lease stops being renewed, so it runs out
@@ -9,16 +9,22 @@
 //   abort     we cancel it mid-run           → resolves, status 'aborted', files written so far collected
 //   platform  no provider can take the job   → rejects with JobError, stage 'lease', nothing paid
 //   kill      this process is killed -9      → nobody left to release it: the lease must run out by itself
+//   budget    the money runs out mid-run     → resolves, status 'budget-reached', paid ≤ budget, files so far collected
+//   ceiling   every provider is too dear     → rejects with XePriceError before signing, nothing paid
+//   unbounded no budget and no timeout       → rejects with XeUsageError before signing, nothing paid
+//
+// A provider raising its price mid-lease ('price-changed') cannot be staged from
+// here: it needs the provider's cooperation, so the SDK's own tests cover it.
 //
 // Prints PASS/FAIL lines; exits non-zero if any check fails.
 //
-//   node 05-failing-job.ts            # all five
+//   node 05-failing-job.ts            # all eight
 //   CASES=exit,kill node 05-failing-job.ts
 
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
-import { Wallet, Xe, fromMicro, toHash, type Hash } from '@xeprotocol/sdk'
+import { Wallet, Xe, XePriceError, XeUsageError, fromMicro, toHash, toMicro, type Hash } from '@xeprotocol/sdk'
 import { JobError, runJob } from '@xeprotocol/sdk/jobs'
 
 const xe = new Xe({
@@ -27,6 +33,7 @@ const xe = new Xe({
   timekeepers: ['https://ldn.core.test.network', 'https://ffm.core.test.network', 'https://nyc.core.test.network'],
 })
 const machine = { vcpus: 1, memoryMb: 1024, diskGb: 1 }
+const budget = toMicro('0.01') // every job needs a limit; this one is never the one that trips
 
 // One billing minute, plus the 30s before expiry at which the next is bought.
 const RELEASE_BOUND_MS = 90_000
@@ -49,7 +56,7 @@ async function checkReleased(hash: Hash, since: number, label: string) {
 
 const cases: Record<string, () => Promise<void>> = {
   async exit() {
-    const job = await runJob(xe, { machine, run: 'echo "reading input…"; echo "input.csv: no such file" >&2; exit 3' })
+    const job = await runJob(xe, { machine, budget, run: 'echo "reading input…"; echo "input.csv: no such file" >&2; exit 3' })
     check(job.status === 'failed', 'exit: status is failed', job.status)
     check(job.exitCode === 3, 'exit: exit code kept', String(job.exitCode))
     check(job.stderr.includes('no such file'), 'exit: stderr kept')
@@ -70,6 +77,7 @@ const cases: Record<string, () => Promise<void>> = {
     const stop = new AbortController()
     const job = await runJob(xe, {
       machine,
+      budget,
       run: 'mkdir -p out; for i in $(seq 600); do echo "row $i" >> out/partial.txt; sleep 1; done',
       signal: stop.signal,
       onEvent: (e) => {
@@ -84,7 +92,7 @@ const cases: Record<string, () => Promise<void>> = {
   async platform() {
     const before = await xe.balance('XUSD')
     try {
-      await runJob(xe, { machine: { vcpus: 512, memoryMb: 1_048_576, diskGb: 1 }, run: 'true' })
+      await runJob(xe, { machine: { vcpus: 512, memoryMb: 1_048_576, diskGb: 1 }, budget, run: 'true' })
       check(false, 'platform: an impossible machine is refused')
     } catch (err) {
       check(err instanceof JobError, 'platform: rejects with JobError', String(err))
@@ -116,9 +124,51 @@ const cases: Record<string, () => Promise<void>> = {
     check(settled.state === 'settled', 'kill: provider settled the orphaned lease')
   },
 
+  async budget() {
+    // Enough for exactly two minutes at the cheapest price; the job wants an hour.
+    const [cheapest] = await xe.quote(machine)
+    if (!cheapest) return check(false, 'budget: some provider is leasable')
+    const twoMinutes = cheapest.pricePerMinute * 2n
+    const job = await runJob(xe, {
+      machine,
+      provider: cheapest.provider,
+      budget: twoMinutes,
+      run: 'mkdir -p out; for i in $(seq 3600); do echo "row $i" >> out/partial.txt; sleep 1; done',
+    })
+    check(job.status === 'budget-reached', 'budget: status is budget-reached', job.status)
+    check(job.paid <= twoMinutes, 'budget: paid no more than the budget', `${fromMicro(job.paid)} of ${fromMicro(twoMinutes)}`)
+    check(job.billedMinutes === 2, 'budget: billed exactly the two minutes it could afford', String(job.billedMinutes))
+    check(job.files.some((f) => f.path === 'partial.txt'), 'budget: files written so far collected')
+    await checkReleased(job.lease, nowMs(), 'budget')
+  },
+
+  async ceiling() {
+    const before = await xe.balance('XUSD')
+    try {
+      await runJob(xe, { machine, budget, maxPricePerMinute: 1n, run: 'true' })
+      check(false, 'ceiling: a 1 micro-XUSD/min ceiling is refused')
+    } catch (err) {
+      check(err instanceof XePriceError, 'ceiling: rejects with XePriceError', String(err))
+      if (err instanceof XePriceError) check(err.price > err.ceiling, 'ceiling: says the price and the ceiling', `${err.price} > ${err.ceiling}`)
+    }
+    check((await xe.balance('XUSD')) === before, 'ceiling: nothing paid')
+  },
+
+  async unbounded() {
+    const before = await xe.balance('XUSD')
+    try {
+      await runJob(xe, { machine, run: 'sleep 3600' })
+      check(false, 'unbounded: a job with no budget and no timeout is refused')
+    } catch (err) {
+      check(err instanceof XeUsageError, 'unbounded: rejects with XeUsageError', String(err))
+    }
+    check((await xe.balance('XUSD')) === before, 'unbounded: nothing paid')
+  },
+
   async child() {
     await runJob(xe, {
       machine,
+      budget,
       run: 'sleep 3600',
       onEvent: (e) => {
         if (e.type === 'leased') console.log(`LEASE ${e.lease.hash}`)
@@ -128,7 +178,7 @@ const cases: Record<string, () => Promise<void>> = {
   },
 }
 
-const selected = (process.env['CASES'] ?? 'exit,timeout,abort,platform,kill').split(',')
+const selected = (process.env['CASES'] ?? 'exit,timeout,abort,platform,kill,budget,ceiling,unbounded').split(',')
 for (const name of selected) {
   const run = cases[name]
   if (!run) throw new Error(`unknown case ${name}; choose from ${Object.keys(cases).join(', ')}`)

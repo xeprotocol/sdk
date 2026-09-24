@@ -9,15 +9,22 @@
 // training, still brings home whatever the script has saved, and releases the
 // machine.
 //
+// Money: the job opens at the cheapest provider's price and keeps it — if the
+// provider raises its price mid-training, renewing stops and the job ends
+// with status 'price-changed' rather than paying more. BUDGET caps the total;
+// when it runs out the job ends with 'budget-reached'. Either way the best model
+// so far still comes home.
+//
 // The setup step installs from PyPI, so the machine needs outbound internet.
 //
 //   EPOCHS=400 node 04-train-a-model.ts
 
 import { readFileSync } from 'node:fs'
-import { Wallet, Xe, fromMicro } from '@xeprotocol/sdk'
+import { Wallet, Xe, fromMicro, toMicro } from '@xeprotocol/sdk'
 import { runJob } from '@xeprotocol/sdk/jobs'
 
 const EPOCHS = process.env['EPOCHS'] ?? '400'
+const BUDGET = toMicro(process.env['BUDGET'] ?? '0.05')
 
 const xe = new Xe({
   client: 'https://ldn.core.test.network',
@@ -73,6 +80,7 @@ const job = await runJob(xe, {
   env: { EPOCHS },
   collect: 'out',
   saveTo: './model',
+  budget: BUDGET,
   timeoutSecs: 60 * 60,
   signal: stop.signal,
   onEvent: (e) => {
@@ -84,7 +92,10 @@ const job = await runJob(xe, {
   },
 })
 
-console.log(`${job.status} after ${(job.wallMs / 60_000).toFixed(1)} min, paid ${fromMicro(job.paid)} XUSD`)
+console.log(`${job.status} after ${(job.wallMs / 60_000).toFixed(1)} min`)
+console.log(`${fromMicro(job.pricePerMinute)} XUSD/min × ${job.billedMinutes} min = ${fromMicro(job.paid)} of ${fromMicro(BUDGET)} XUSD budget`)
+if (job.status === 'budget-reached') console.log('the budget ran out before training finished — raise BUDGET to train longer')
+if (job.status === 'price-changed') console.log('the provider raised its price mid-job, so renewing stopped')
 if (job.files.some((f) => f.path === 'model.pkl')) {
   const metrics = JSON.parse(readFileSync('./model/metrics.json', 'utf8')) as { epoch: number; test_accuracy: number }
   console.log(`model saved to ./model/model.pkl — epoch ${metrics.epoch}, test accuracy ${metrics.test_accuracy.toFixed(4)}`)

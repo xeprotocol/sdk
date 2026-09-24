@@ -5,12 +5,13 @@
 // a per-region, per-month summary as CSV and the headline numbers as JSON.
 //
 // Uses only the Python standard library on the machine, so it needs no
-// internet there.
+// internet there. The price ceiling rules out any provider dearer than
+// 0.002 XUSD a minute; the budget caps the whole job at 0.02 XUSD.
 //
 //   ROWS=500000 node 03-data-processing.ts
 
 import { readFileSync } from 'node:fs'
-import { Wallet, Xe, fromMicro } from '@xeprotocol/sdk'
+import { Wallet, Xe, fromMicro, toMicro } from '@xeprotocol/sdk'
 import { runJob } from '@xeprotocol/sdk/jobs'
 
 const ROWS = Number(process.env['ROWS'] ?? 200_000)
@@ -77,6 +78,8 @@ const job = await runJob(xe, {
   run: 'python3 summarise.py',
   collect: 'out',
   saveTo: './results',
+  maxPricePerMinute: toMicro('0.002'),
+  budget: toMicro('0.02'),
   onEvent: (e) => {
     if (e.type === 'uploaded') console.log(`uploaded ${e.files} files, ${(e.bytes / 1e6).toFixed(1)} MB`)
     if (e.type === 'stdout') process.stdout.write(e.text)

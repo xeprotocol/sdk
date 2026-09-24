@@ -17,7 +17,8 @@ Pick your language — the tutorials are the same in both:
 
 Coming next: **jobs** — run your code on a rented machine and get the results
 back. The API is being designed usage-first in [`jobs/`](jobs/README.md); those
-programs do not run yet.
+programs do not run yet. How jobs and leases will keep you from overpaying is on
+its own page: [Budgets and prices](../docs/budgets.md).
 
 Tutorials 1–4 need nothing but Node.js. Leasing (5–6) is paid in **XUSD**, which
 the testnet faucet does not hand out yet — tutorial 5 explains.
