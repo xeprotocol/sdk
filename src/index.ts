@@ -13,12 +13,12 @@ export type {
   TimekeeperSet,
 } from './client.js'
 
-export { Xe, nowNs } from './xe.js'
-export type { OpenLeaseOptions, OpenedLease, RenewedLease, SendOptions, XeOptions } from './xe.js'
+export { Xe, leasePaid, nowNs } from './xe.js'
+export type { Machine, OpenLeaseOptions, OpenedLease, Quote, RenewGuards, RenewedLease, SendOptions, XeOptions } from './xe.js'
 
 export { holdLease } from './hold.js'
-export type { HoldEvent, HoldOptions, HoldResult } from './hold.js'
-export { leaseCost, LEASE_DISK_GB_RATE, LEASE_MEM_GB_RATE, LEASE_VCPU_RATE } from './lease.js'
+export type { HoldEvent, HoldOptions, HoldReason, HoldResult } from './hold.js'
+export { leaseCost, pricePerMinute, LEASE_DISK_GB_RATE, LEASE_MEM_GB_RATE, LEASE_VCPU_RATE } from './lease.js'
 export type { LeaseDimensions } from './lease.js'
 export {
   attestationPayload,
@@ -38,8 +38,10 @@ export type { SolveOptions } from './pow.js'
 
 export {
   XeApiError,
+  XeBudgetError,
   XeError,
   XeInsufficientFundsError,
+  XePriceError,
   XeTransportError,
   XeUsageError,
   isRetryable,

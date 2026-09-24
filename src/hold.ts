@@ -1,7 +1,7 @@
 import type { LeaseRecord } from './client.js'
-import { XeUsageError, isRetryable } from './errors.js'
+import { XeBudgetError, XePriceError, XeUsageError, isRetryable } from './errors.js'
 import type { Hash } from './types.js'
-import { nowNs, type RenewedLease, type Xe } from './xe.js'
+import { leasePaid, nowNs, type RenewGuards, type RenewedLease, type Xe } from './xe.js'
 
 export interface HoldOptions {
   /** Seconds added per renewal. One billing unit (60) is the natural choice. */
@@ -14,6 +14,14 @@ export interface HoldOptions {
   cutoffMs?: number
   /** Retry spacing for retryable failures. Default 4s. */
   retryMs?: number
+  /**
+   * micro-XUSD per minute a renewal may cost. Default: the price the lease was
+   * opened at — a provider that raises its price does not get renewed
+   * (`reason: 'price-changed'`) unless this allows the new price.
+   */
+  maxPricePerMinute?: bigint
+  /** micro-XUSD the whole lease may cost; renewing stops before it would pass this (`reason: 'budget-reached'`). */
+  budget?: bigint
   /** Abort to stop renewing; the lease then runs out at its current expiry. */
   signal?: AbortSignal
   onEvent?: (event: HoldEvent) => void
@@ -23,12 +31,17 @@ export type HoldEvent =
   | { type: 'waiting'; lease: LeaseRecord; renewAt: Date }
   | { type: 'renewed'; renewal: RenewedLease; lease: LeaseRecord }
   | { type: 'retry'; error: Error; attempt: number }
-  | { type: 'done'; lease: LeaseRecord; reason: 'target-reached' | 'aborted' }
+  | { type: 'done'; lease: LeaseRecord; reason: HoldReason }
+
+/** Why renewing stopped. The lease itself runs on to the end of the time already paid for. */
+export type HoldReason = 'target-reached' | 'aborted' | 'price-changed' | 'budget-reached'
 
 export interface HoldResult {
   lease: LeaseRecord
   renewals: RenewedLease[]
-  reason: 'target-reached' | 'aborted'
+  reason: HoldReason
+  /** micro-XUSD escrowed for the lease: first term plus every renewal. */
+  paid: bigint
 }
 
 /**
@@ -52,15 +65,17 @@ export async function holdLease(xe: Xe, leaseHash: Hash, options: HoldOptions = 
   const renewals: RenewedLease[] = []
 
   let lease = await xe.waitForLease(leaseHash, ['accepted'])
+  const guards = {
+    maxPricePerMinute: options.maxPricePerMinute ?? (await xe.openingPricePerMinute(lease)),
+    ...(options.budget === undefined ? {} : { budget: options.budget }),
+  }
+  const done = (reason: HoldReason): HoldResult => {
+    emit({ type: 'done', lease, reason })
+    return { lease, renewals, reason, paid: leasePaid(lease) }
+  }
   for (;;) {
-    if (options.signal?.aborted) {
-      emit({ type: 'done', lease, reason: 'aborted' })
-      return { lease, renewals, reason: 'aborted' }
-    }
-    if (totalSecs !== undefined && lease.effectiveDuration >= totalSecs) {
-      emit({ type: 'done', lease, reason: 'target-reached' })
-      return { lease, renewals, reason: 'target-reached' }
-    }
+    if (options.signal?.aborted) return done('aborted')
+    if (totalSecs !== undefined && lease.effectiveDuration >= totalSecs) return done('target-reached')
 
     const expiryMs = Number(lease.effectiveExpiry / 1_000_000n)
     const renewAt = expiryMs - leadMs
@@ -70,7 +85,14 @@ export async function holdLease(xe: Xe, leaseHash: Hash, options: HoldOptions = 
 
     const step = totalSecs === undefined ? renewSecs : minBig(renewSecs, totalSecs - lease.effectiveDuration)
     const before = lease.effectiveDuration
-    const renewal = await renewBeforeExpiry(xe, leaseHash, step, expiryMs - cutoffMs, retryMs, emit)
+    let renewal: RenewedLease
+    try {
+      renewal = await renewBeforeExpiry(xe, leaseHash, step, guards, expiryMs - cutoffMs, retryMs, emit)
+    } catch (err) {
+      if (err instanceof XePriceError) return done('price-changed')
+      if (err instanceof XeBudgetError) return done('budget-reached')
+      throw err
+    }
     renewals.push(renewal)
     lease = await confirmExtended(xe, leaseHash, before, expiryMs)
     emit({ type: 'renewed', renewal, lease })
@@ -81,13 +103,14 @@ async function renewBeforeExpiry(
   xe: Xe,
   leaseHash: Hash,
   secs: bigint,
+  guards: RenewGuards,
   giveUpAt: number,
   retryMs: number,
   emit: (e: HoldEvent) => void,
 ): Promise<RenewedLease> {
   for (let attempt = 1; ; attempt++) {
     try {
-      return await xe.renewLease(leaseHash, secs)
+      return await xe.renewLease(leaseHash, secs, guards)
     } catch (err) {
       if (!isRetryable(err) || Date.now() + retryMs >= giveUpAt) throw err
       emit({ type: 'retry', error: err as Error, attempt })

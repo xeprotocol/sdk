@@ -12,7 +12,7 @@ import { toAddress, toHash, toPublicKey, type Attestation, type Hash, type Signe
 import type { LeaseRecord } from '../../src/client.js'
 import { Xe, type RenewedLease } from '../../src/xe.js'
 import { Wallet } from '../../src/wallet.js'
-import { XeApiError } from '../../src/errors.js'
+import { XeApiError, XeBudgetError, XePriceError, XeUsageError } from '../../src/errors.js'
 
 const fixture = parseLossless(vectorsJson) as {
   attestation_vectors: { lease_hash: string; timestamp: bigint; payload_hex: string; public_key: string; signature: string }[]
@@ -104,7 +104,8 @@ describe('lease wire form', () => {
 
 describe('holdLease', () => {
   /** A fake ledger: one accepted lease that each renewal extends. */
-  function fakeXe(opts: { failFirst?: number } = {}) {
+  function fakeXe(opts: { failFirst?: number; price?: () => bigint } = {}) {
+    const price = opts.price ?? (() => 1n)
     const start = BigInt(Date.now()) * 1_000_000n
     const lease: LeaseRecord = {
       hash: toHash('a'.repeat(64)),
@@ -129,13 +130,20 @@ describe('holdLease', () => {
     const xe = {
       waitForLease: async () => ({ ...lease }),
       lease: async () => ({ ...lease, renewals: [...lease.renewals] }),
-      renewLease: async (hash: Hash, secs: bigint): Promise<RenewedLease> => {
+      openingPricePerMinute: async () => 1n,
+      renewLease: async (hash: Hash, secs: bigint, guards: { maxPricePerMinute?: bigint; budget?: bigint } = {}): Promise<RenewedLease> => {
+        const cost = price()
+        if (guards.maxPricePerMinute !== undefined && cost > guards.maxPricePerMinute) {
+          throw new XePriceError(lease.provider, cost, guards.maxPricePerMinute)
+        }
+        const paid = lease.renewals.reduce((sum, r) => sum + r.cost, lease.cost)
+        if (guards.budget !== undefined && paid + cost > guards.budget) throw new XeBudgetError(paid, cost, guards.budget)
         if (failures-- > 0) throw Object.assign(new Error('rate limited'), { retryable: true, name: 'XeApiError' })
         renewTimes.push(Date.now())
-        lease.renewals.push({ renewHash: toHash('d'.repeat(64)), duration: secs, cost: 1n, startTime: 0n })
+        lease.renewals.push({ renewHash: toHash('d'.repeat(64)), duration: secs, cost, startTime: 0n })
         lease.effectiveDuration += secs
         lease.effectiveExpiry = lease.startTime + lease.effectiveDuration * 1_000_000_000n
-        return { hash: toHash('d'.repeat(64)), accepted: true, lease: hash, cost: 1n, durationSecs: secs, renewTime: 0n, epoch: {} as never }
+        return { hash: toHash('d'.repeat(64)), accepted: true, lease: hash, cost, durationSecs: secs, renewTime: 0n, epoch: {} as never }
       },
     }
     return { xe: xe as unknown as Xe, lease, renewTimes }
@@ -156,6 +164,49 @@ describe('holdLease', () => {
     const startMs = Number(lease.startTime / 1_000_000n)
     renewTimes.forEach((t, i) => expect(t).toBeLessThan(startMs + (i + 1) * 1000))
     expect(events.at(-1)).toBe('done')
+  }, 10_000)
+
+  it('keeps the opening price: a raised price stops the renewing instead of being paid', async () => {
+    let price = 1n
+    const { xe, lease } = fakeXe({ price: () => price })
+    const events: HoldEvent[] = []
+    const result = await holdLease(xe, lease.hash, {
+      renewSecs: 1,
+      totalSecs: 10,
+      leadMs: 400,
+      onEvent: (e) => {
+        events.push(e)
+        if (e.type === 'renewed') price = 2n // the provider raises its price after the first renewal
+      },
+    })
+    expect(result.reason).toBe('price-changed')
+    expect(result.renewals).toHaveLength(1)
+    expect(result.paid).toBe(2n) // first term + one renewal at the opening price, nothing at the new one
+    expect(events.at(-1)).toMatchObject({ type: 'done', reason: 'price-changed' })
+  }, 10_000)
+
+  it('pays a raised price when maxPricePerMinute allows it', async () => {
+    let price = 1n
+    const { xe, lease } = fakeXe({ price: () => price })
+    const result = await holdLease(xe, lease.hash, {
+      renewSecs: 1,
+      totalSecs: 3,
+      leadMs: 400,
+      maxPricePerMinute: 2n,
+      onEvent: (e) => {
+        if (e.type === 'renewed') price = 2n
+      },
+    })
+    expect(result.reason).toBe('target-reached')
+    expect(result.renewals.map((r) => r.cost)).toEqual([1n, 2n])
+  }, 10_000)
+
+  it('stops before a renewal would take the lease past its budget', async () => {
+    const { xe, lease } = fakeXe()
+    const result = await holdLease(xe, lease.hash, { renewSecs: 1, leadMs: 400, budget: 3n })
+    expect(result.reason).toBe('budget-reached')
+    expect(result.paid).toBe(3n) // first term + two renewals; a third would make 4
+    expect(result.renewals).toHaveLength(2)
   }, 10_000)
 
   it('stops renewing when aborted, leaving the lease to run out', async () => {
@@ -223,5 +274,95 @@ describe('rentLease', () => {
     const { xe, cancelled } = setup(['timeout', 'timeout'])
     await expect(xe.rentLease(opts, { acceptTimeoutMs: 1, attempts: 2 })).rejects.toThrow(/timeout/)
     expect(cancelled).toHaveLength(2)
+  })
+})
+
+describe('price protection before signing', () => {
+  const provider = toAddress('c'.repeat(64))
+  const cert = (milli: bigint, expiresAt = 0n) => ({ hash: toHash('e'.repeat(64)), provider, priceMultiplierMilli: milli, expiresAt, raw: {} })
+  const accepted = {
+    hash: toHash('a'.repeat(64)),
+    state: 'accepted',
+    provider,
+    vcpus: 1n,
+    memoryMb: 1024n,
+    diskGb: 1n,
+    cost: 517n,
+    renewals: [],
+    settled: false,
+    effectiveExpiry: (BigInt(Date.now()) + 60_000n) * 1_000_000n,
+  } as unknown as LeaseRecord
+
+  function xeWith(certMilli: bigint) {
+    const xe = new Xe({ client: 'http://node.test', wallet: Wallet.create() })
+    vi.spyOn(xe.client, 'certificate').mockResolvedValue(cert(certMilli))
+    vi.spyOn(xe.client, 'lease').mockResolvedValue({ ...accepted, consumer: xe.address })
+    // Anything past the guards would go to the network; make that loud.
+    const network = vi.spyOn(xe.client, 'balances').mockRejectedValue(new Error('reached the network'))
+    return { xe, network }
+  }
+
+  it('renewLease refuses a price above the ceiling without attesting or signing', async () => {
+    const { xe, network } = xeWith(2500n)
+    await expect(xe.renewLease(accepted.hash, 60, { maxPricePerMinute: 517n })).rejects.toMatchObject({
+      name: 'XePriceError',
+      price: 1293n,
+      ceiling: 517n,
+    })
+    expect(network).not.toHaveBeenCalled()
+  })
+
+  it('renewLease refuses a renewal that would pass the budget', async () => {
+    const { xe } = xeWith(1000n)
+    const err = await xe.renewLease(accepted.hash, 60, { budget: 1000n }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(XeBudgetError)
+    expect(err).toMatchObject({ paid: 517n, next: 517n, budget: 1000n })
+  })
+
+  it('openLease refuses a provider above the ceiling', async () => {
+    const { xe, network } = xeWith(2500n)
+    const err = await xe
+      .openLease({ provider, vcpus: 1, memoryMb: 1024, diskGb: 1, durationSecs: 60, maxPricePerMinute: 1000n })
+      .catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(XePriceError)
+    expect(network).not.toHaveBeenCalled()
+  })
+
+  it('bills whole minutes only: other durations are refused, not rounded up', async () => {
+    const { xe } = xeWith(1000n)
+    await expect(xe.openLease({ provider, vcpus: 1, memoryMb: 1024, diskGb: 1, durationSecs: 61 })).rejects.toThrow(XeUsageError)
+    await expect(xe.renewLease(accepted.hash, 90)).rejects.toThrow(/whole number of minutes/)
+  })
+})
+
+describe('quote', () => {
+  it('lists providers that can take the machine, cheapest first', async () => {
+    const xe = new Xe({ client: 'http://node.test', wallet: Wallet.create() })
+    const p = (c: string, usedVcpus: bigint) => ({
+      account: toAddress(c.repeat(64)),
+      vcpus: 4n,
+      memoryMb: 8192n,
+      diskGb: 50n,
+      maxConcurrentLeases: 5n,
+      usedVcpus,
+      usedMemoryMb: 0n,
+      usedDiskGb: 0n,
+      activeLeases: 0n,
+      raw: {},
+    })
+    vi.spyOn(xe.client, 'providers').mockResolvedValue([p('1', 0n), p('2', 0n), p('3', 4n), p('4', 0n)])
+    const certs: Record<string, bigint | 'expired' | 'none'> = { '1': 2500n, '2': 1000n, '4': 'expired' }
+    vi.spyOn(xe.client, 'certificate').mockImplementation(async (a) => {
+      const c = certs[a[0]!]
+      if (c === undefined || c === 'none') throw new Error('404')
+      if (c === 'expired') return { hash: toHash('e'.repeat(64)), provider: a, priceMultiplierMilli: 1000n, expiresAt: 1n, raw: {} }
+      return { hash: toHash('e'.repeat(64)), provider: a, priceMultiplierMilli: c, expiresAt: 0n, raw: {} }
+    })
+    const quotes = await xe.quote({ vcpus: 1, memoryMb: 1024, diskGb: 1 })
+    // '3' is full, '4' has an expired certificate.
+    expect(quotes.map((q) => [q.provider[0], q.pricePerMinute])).toEqual([
+      ['2', 517n],
+      ['1', 1293n],
+    ])
   })
 })

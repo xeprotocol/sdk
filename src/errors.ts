@@ -56,6 +56,41 @@ export class XeInsufficientFundsError extends XeUsageError {
   }
 }
 
+/**
+ * A provider's price is above the ceiling the caller set (or the price the
+ * lease opened at). Thrown before anything is signed: nothing was spent.
+ */
+export class XePriceError extends XeUsageError {
+  override readonly name = 'XePriceError'
+  readonly provider: string
+  /** micro-XUSD per minute the provider asks. */
+  readonly price: bigint
+  /** micro-XUSD per minute the caller would pay at most. */
+  readonly ceiling: bigint
+
+  constructor(provider: string, price: bigint, ceiling: bigint) {
+    super(`provider ${provider.slice(0, 12)} asks ${price} micro-XUSD/min, above the ceiling of ${ceiling}`)
+    this.provider = provider
+    this.price = price
+    this.ceiling = ceiling
+  }
+}
+
+/** A renewal would take a lease's total cost past the caller's budget. Thrown before signing. */
+export class XeBudgetError extends XeUsageError {
+  override readonly name = 'XeBudgetError'
+  readonly paid: bigint
+  readonly next: bigint
+  readonly budget: bigint
+
+  constructor(paid: bigint, next: bigint, budget: bigint) {
+    super(`renewing would cost ${paid + next} micro-XUSD in total, over the budget of ${budget}`)
+    this.paid = paid
+    this.next = next
+    this.budget = budget
+  }
+}
+
 export function isRetryable(err: unknown): boolean {
   return (
     (err instanceof XeApiError && err.retryable) ||
