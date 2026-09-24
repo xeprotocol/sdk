@@ -73,7 +73,7 @@ print(f'processed {rows} rows in {time.time() - t0:.2f}s')
 `
 
 const job = await runJob(xe, {
-  machine: { vcpus: 2, memoryMb: 2048, diskGb: 2 },
+  machine: { vcpus: 1, memoryMb: 1024, diskGb: 1 },
   files: { 'sales.csv': sales, 'summarise.py': summarise },
   run: 'python3 summarise.py',
   collect: 'out',
