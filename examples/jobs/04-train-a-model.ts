@@ -1,6 +1,6 @@
 // 4. Train a small model — a long job, paid for a minute at a time.
 //
-// Installs scikit-learn, then trains a small neural network on the bundled
+// Installs scikit-learn (from the machine's Ubuntu packages), then trains a small neural network on the bundled
 // handwritten-digits dataset for EPOCHS passes, printing progress as it goes.
 // The trained model and its metrics come home in ./model/.
 //
@@ -15,7 +15,8 @@
 // when it runs out the job ends with 'budget-reached'. Either way the best model
 // so far still comes home.
 //
-// The setup step installs from PyPI, so the machine needs outbound internet.
+// The setup step installs from Ubuntu's package mirrors, so the machine needs
+// outbound internet.
 //
 //   EPOCHS=400 node 04-train-a-model.ts
 
@@ -75,7 +76,7 @@ process.once('SIGINT', () => {
 const job = await runJob(xe, {
   machine: { vcpus: 2, memoryMb: 2048, diskGb: 4 },
   files: { 'train.py': train },
-  setup: 'python3 -m pip install --quiet --user numpy scikit-learn',
+  setup: 'apt-get update -qq && apt-get install -y -qq python3-sklearn > /dev/null',
   run: 'python3 train.py',
   env: { EPOCHS },
   collect: 'out',

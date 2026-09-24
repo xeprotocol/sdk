@@ -33,6 +33,14 @@ for (const lang of ['typescript', 'javascript']) {
     }
   }
 }
+// The job programs are whole files, not fenced blocks.
+const jobsDir = join(root, 'examples', 'jobs')
+for (const file of readdirSync(jobsDir).filter((f) => f.endsWith('.ts')).sort()) {
+  const target = join(out, 'jobs', file)
+  mkdirSync(dirname(target), { recursive: true })
+  writeFileSync(target, readFileSync(join(jobsDir, file), 'utf8'))
+  programs.push(`jobs/${file} → ${relative(root, target)}`)
+}
 if (programs.length === 0) {
   console.error('FAIL: no complete programs found in examples/')
   process.exit(1)
@@ -52,10 +60,10 @@ const base = {
   noEmit: true,
   skipLibCheck: true,
   baseUrl: '.',
-  paths: { '@xeprotocol/sdk': ['../src/index.ts'] },
+  paths: { '@xeprotocol/sdk': ['../src/index.ts'], '@xeprotocol/sdk/jobs': ['../src/jobs/index.ts'] },
 }
 const configs = {
-  'tsconfig.ts.json': { compilerOptions: base, include: ['typescript/*.ts'] },
+  'tsconfig.ts.json': { compilerOptions: base, include: ['typescript/*.ts', 'jobs/*.ts'] },
   'tsconfig.js.json': {
     compilerOptions: { ...base, allowJs: true, checkJs: true, noImplicitAny: false },
     include: ['javascript/*.mjs'],
