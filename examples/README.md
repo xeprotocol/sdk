@@ -15,6 +15,11 @@ Pick your language — the tutorials are the same in both:
 | 5 | Renting a machine | find a provider, price a machine, rent it | [TS](typescript/05-renting-a-machine.md) | [JS](javascript/05-renting-a-machine.md) |
 | 6 | Holding a lease open | keep a machine as long as you need it, paying a minute at a time | [TS](typescript/06-holding-a-lease-open.md) | [JS](javascript/06-holding-a-lease-open.md) |
 
+**Jobs**: run your code on a rented machine and get the results back. Five
+complete programs are in [`jobs/`](jobs/README.md) and will become tutorials 7–11.
+How jobs and leases keep you from overpaying is on its own page:
+[Budgets and prices](../docs/budgets.md).
+
 Tutorials 1–4 need nothing but Node.js. Leasing (5–6) is paid in **XUSD**, which
 the testnet faucet does not hand out yet — tutorial 5 explains.
 

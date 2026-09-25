@@ -7,8 +7,8 @@
 // the package itself (its built dist/). Each language gets its own directory,
 // and so its own wallet.seed, exactly as a reader following along would.
 //
-// Tutorials 1–4 need nothing: the faucet funds the wallet. Leasing (5–6) is
-// paid in XUSD, which the faucet does not hand out, so those run only when
+// Tutorials 1–4 need nothing: the faucet funds the wallet. Leasing (5–6) and
+// the short job programs (examples/jobs 01, 03) are paid in XUSD, which the faucet does not hand out, so those run only when
 // XE_LEASE_SEED names a wallet that holds some; otherwise they are skipped.
 // Pending XUSD sent to that wallet is claimed first, so it can be refunded by
 // address alone.
@@ -40,8 +40,9 @@ let failed = 0
 let skipped = 0
 rmSync(out, { recursive: true, force: true })
 
-// Enough for both languages' leasing tutorials (~0.003 XUSD) with headroom.
-const MIN_LEASE_XUSD = 10_000n
+// Enough for both languages' leasing tutorials (~0.003 XUSD) and the two job
+// programs (budgets 0.01 + 0.02 XUSD, ~0.002 spent) with headroom.
+const MIN_LEASE_XUSD = 50_000n
 
 /**
  * Claim anything sent to the leasing wallet and check it can pay. It is refunded
@@ -110,6 +111,38 @@ for (const lang of ['typescript', 'javascript']) {
       console.log(output.replace(/^/gm, '    '))
     }
   }
+}
+
+// Jobs: the two short, single-job programs. The others hold machines for many
+// minutes (training, the failure cases) and are run by hand.
+const JOBS = ['01-hello-world.ts', '03-data-processing.ts']
+const jobsCwd = join(out, 'jobs')
+mkdirSync(jobsCwd, { recursive: true })
+for (const file of JOBS) {
+  const label = `jobs/${file}`
+  if (!leaseReady) {
+    console.log(`SKIP: ${label} — jobs are paid in XUSD; ${leaseSeed ? 'the leasing wallet is not ready (above)' : 'set XE_LEASE_SEED to run it'}`)
+    skipped++
+    continue
+  }
+  writeFileSync(join(jobsCwd, 'wallet.seed'), leaseSeed, { mode: 0o600 })
+  writeFileSync(join(jobsCwd, file), readFileSync(join(root, 'examples', 'jobs', file), 'utf8'))
+  const started = Date.now()
+  const run = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings=ExperimentalWarning', file], {
+    cwd: jobsCwd,
+    encoding: 'utf8',
+    timeout: 10 * 60_000,
+  })
+  const secs = ((Date.now() - started) / 1000).toFixed(1)
+  const output = `${run.stdout ?? ''}${run.stderr ?? ''}`.trim()
+  if (run.status === 0) {
+    console.log(`PASS: ${label} (${secs}s)`)
+    passed++
+  } else {
+    console.log(`FAIL: ${label} (exit ${run.status ?? run.signal}, ${secs}s)`)
+    failed++
+  }
+  console.log(output.replace(/^/gm, '    '))
 }
 
 rmSync(out, { recursive: true, force: true })

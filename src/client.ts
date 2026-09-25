@@ -315,6 +315,11 @@ export class XeClient {
     return toCertificate(await this.request<Record<string, unknown>>(`/certificate/${provider}`))
   }
 
+  /** A certificate by hash, including expired and superseded ones: what a lease was priced against. */
+  async certificateByHash(hash: string): Promise<Certificate> {
+    return toCertificate(await this.request<Record<string, unknown>>(`/certificate/hash/${hash}`))
+  }
+
   async timekeepers(): Promise<TimekeeperSet> {
     const raw = (await this.statechainValue('sys.timekeepers')) as Record<string, unknown>
     const value = (raw['value'] ?? raw) as Record<string, unknown>

@@ -13,6 +13,18 @@ export interface LeaseDimensions {
 
 const ceilDiv = (a: bigint, b: bigint): bigint => (a + b - 1n) / b
 
+/** micro-XUSD for one billing minute of this machine at this multiplier. */
+export function pricePerMinute(dims: LeaseDimensions, multiplierMilli: bigint): bigint {
+  return leaseCost(dims, 60n, multiplierMilli)
+}
+
+/** Lease terms are billed in whole minutes; anything else would pay for time it cannot use. */
+export function requireWholeMinutes(durationSecs: bigint, what: string): void {
+  if (durationSecs <= 0n || durationSecs % 60n !== 0n) {
+    throw new XeUsageError(`${what}: duration must be a whole number of minutes (a multiple of 60s), got ${durationSecs}s`)
+  }
+}
+
 /**
  * The exact cost the ledger will demand, in micro-XUSD.
  *
