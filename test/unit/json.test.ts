@@ -81,6 +81,24 @@ describe('lossless JSON', () => {
     it('leaves ordinary values untouched', () => {
       expect(stringifyWithBigInts({ a: 1, b: 'x', c: null })).toBe('{"a":1,"b":"x","c":null}')
     })
+
+    it('preserves strings matching the bigint marker alongside real bigints', () => {
+      expect(stringifyWithBigInts({ memo: '__bigint__123' })).toBe('{"memo":"__bigint__123"}')
+      expect(stringifyWithBigInts({ memo: '__bigint__-9' })).toBe('{"memo":"__bigint__-9"}')
+      const out = stringifyWithBigInts({
+        type: 'send',
+        memo: '__bigint__123',
+        note: '__bigint___-9',
+        amount: 123n,
+      })
+      expect(out).toBe('{"type":"send","memo":"__bigint__123","note":"__bigint___-9","amount":123}')
+      expect(JSON.parse(out)).toEqual({
+        type: 'send',
+        memo: '__bigint__123',
+        note: '__bigint___-9',
+        amount: 123,
+      })
+    })
   })
 })
 
