@@ -107,6 +107,24 @@ describe('XeClient', () => {
       ])
       expect((await c.pending(ADDR))[0]!.amount).toBe(18446744073709551615n)
     })
+
+    it('preserves marker-like memo strings as JSON strings in /blocks/send request bodies', async () => {
+      let capturedBody = ''
+      const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+        capturedBody = String(init?.body ?? '')
+        return new Response('{"ok":true}', { status: 200 })
+      }) as unknown as typeof globalThis.fetch
+      const c = new XeClient({ url: 'http://node.test', fetch, retries: 0 })
+      await c.request('/blocks/send', {
+        method: 'POST',
+        body: { type: 'send', memo: '__bigint__123', amount: 123n },
+      })
+      expect(capturedBody).toBe('{"type":"send","memo":"__bigint__123","amount":123}')
+      const parsed = JSON.parse(capturedBody) as { memo: unknown; amount: unknown }
+      expect(parsed.memo).toBe('__bigint__123')
+      expect(typeof parsed.memo).toBe('string')
+      expect(parsed.amount).toBe(123)
+    })
   })
 
   describe('list unwrapping', () => {
