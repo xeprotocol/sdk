@@ -125,6 +125,22 @@ export interface LeaseRecord {
  *
  * There is no global state: two clients pointed at two nodes do not interfere.
  */
+function parseRetryAfter(header: string | null | undefined): number | undefined {
+  if (!header) return undefined
+  const trimmed = header.trim()
+  if (!trimmed) return undefined
+  const seconds = Number(trimmed)
+  if (!Number.isNaN(seconds) && seconds >= 0) {
+    return Math.round(seconds * 1000)
+  }
+  const dateMs = Date.parse(trimmed)
+  if (!Number.isNaN(dateMs)) {
+    const diff = dateMs - Date.now()
+    return diff > 0 ? diff : 0
+  }
+  return undefined
+}
+
 export class XeClient {
   readonly url: string
   readonly #timeoutMs: number
@@ -155,7 +171,11 @@ export class XeClient {
         // Retrying a terminal failure just burns time: a bad signature is
         // still bad on the third attempt.
         if (!isRetryable(err) || attempt === this.#retries) throw err
-        await new Promise((r) => setTimeout(r, this.#backoffMs * 2 ** attempt))
+        const delayMs =
+          err instanceof XeApiError && typeof err.retryAfterMs === 'number' && err.retryAfterMs >= 0
+            ? err.retryAfterMs
+            : this.#backoffMs * 2 ** attempt
+        await new Promise((r) => setTimeout(r, delayMs))
       }
     }
     throw lastError
@@ -179,6 +199,11 @@ export class XeClient {
       clearTimeout(timer)
     }
 
+    const retryAfterHeader = res.headers?.get
+      ? (res.headers.get('Retry-After') ?? res.headers.get('retry-after'))
+      : null
+    const retryAfterMs = parseRetryAfter(retryAfterHeader)
+
     const text = await res.text()
     let body: unknown
     try {
@@ -186,17 +211,36 @@ export class XeClient {
     } catch {
       // A body we cannot parse is still a failure worth surfacing verbatim
       // rather than swallowing into an empty result.
-      if (!res.ok) throw new XeApiError(`HTTP ${res.status}: ${text.slice(0, 200)}`, res.status, res.status >= 500, text)
+      if (!res.ok) {
+        throw new XeApiError(
+          `HTTP ${res.status}: ${text.slice(0, 200)}`,
+          res.status,
+          res.status === 429 || res.status >= 500,
+          text,
+          retryAfterMs,
+        )
+      }
       throw new XeApiError(`HTTP ${res.status}: response was not JSON`, res.status, false, text)
     }
 
     if (!res.ok) {
       const rec = (body ?? {}) as Record<string, unknown>
-      const message = typeof rec['error'] === 'string' ? rec['error'] : `HTTP ${res.status}`
+      let message: string
+      if (typeof rec['error'] === 'string') {
+        message = rec['error']
+      } else if (
+        typeof rec['error'] === 'object' &&
+        rec['error'] !== null &&
+        typeof (rec['error'] as Record<string, unknown>)['message'] === 'string'
+      ) {
+        message = (rec['error'] as Record<string, unknown>)['message'] as string
+      } else {
+        message = `HTTP ${res.status}`
+      }
       // The node classifies block-submission failures itself; trust that flag
       // when present and fall back to the status class when it is not.
-      const retryable = typeof rec['retryable'] === 'boolean' ? rec['retryable'] : res.status >= 500
-      throw new XeApiError(message, res.status, retryable, body)
+      const retryable = typeof rec['retryable'] === 'boolean' ? rec['retryable'] : (res.status === 429 || res.status >= 500)
+      throw new XeApiError(message, res.status, retryable, body, retryAfterMs)
     }
     return body as T
   }

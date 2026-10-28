@@ -6,7 +6,7 @@ import { toAddress, toHash, type SignedBlock } from '../../src/types.js'
 
 const ADDR = toAddress('2ca26366310210ce3b26d472f37060826091ddd2259fecbea86b7e0d4e5c5496')
 
-function stub(responses: Array<{ status: number; body: string }>): {
+function stub(responses: Array<{ status: number; body: string; headers?: Record<string, string> }>): {
   fetch: typeof globalThis.fetch
   calls: string[]
 } {
@@ -15,12 +15,12 @@ function stub(responses: Array<{ status: number; body: string }>): {
   const fetch = vi.fn(async (url: string | URL | Request) => {
     calls.push(String(url))
     const r = responses[Math.min(i++, responses.length - 1)]!
-    return new Response(r.body, { status: r.status })
+    return new Response(r.body, { status: r.status, headers: r.headers })
   }) as unknown as typeof globalThis.fetch
   return { fetch, calls }
 }
 
-const client = (responses: Array<{ status: number; body: string }>, retries = 0) => {
+const client = (responses: Array<{ status: number; body: string; headers?: Record<string, string> }>, retries = 0) => {
   const { fetch, calls } = stub(responses)
   return { c: new XeClient({ url: 'http://node.test', fetch, retries, backoffMs: 1 }), calls }
 }
@@ -42,6 +42,23 @@ describe('XeClient', () => {
     it('surfaces the node error message', async () => {
       const { c } = client([{ status: 400, body: '{"error":"invalid signature"}' }])
       await expect(c.nodeInfo()).rejects.toThrow('invalid signature')
+    })
+
+    it('surfaces structured proxy error message when error is an object', async () => {
+      const { c } = client([
+        {
+          status: 404,
+          body: JSON.stringify({
+            error: {
+              code: 'not_found',
+              status: 404,
+              message: 'No API route at /no/such/route.',
+              hint: 'No route matches.',
+            },
+          }),
+        },
+      ])
+      await expect(c.nodeInfo()).rejects.toThrow('No API route at /no/such/route.')
     })
 
     it('surfaces an unparseable body rather than swallowing it', async () => {
@@ -88,6 +105,37 @@ describe('XeClient', () => {
     it('classifies a 5xx without a retryable flag as retryable', async () => {
       const { c } = client([{ status: 503, body: '{"error":"busy"}' }], 0)
       await expect(c.nodeInfo()).rejects.toSatisfy((e: unknown) => isRetryable(e))
+    })
+
+    it('classifies a 429 rate limit without a retryable flag as retryable', async () => {
+      const { c } = client([{ status: 429, body: '{"error":"rate limit exceeded"}' }], 0)
+      await expect(c.nodeInfo()).rejects.toSatisfy((e: unknown) => isRetryable(e))
+    })
+
+    it('retries on 429 and then succeeds', async () => {
+      const { c, calls } = client(
+        [
+          { status: 429, body: '{"error":"rate limit exceeded"}' },
+          { status: 200, body: '{"network":"testnet-0003"}' },
+        ],
+        3,
+      )
+      await expect(c.networkId()).resolves.toBe('testnet-0003')
+      expect(calls.length).toBe(2)
+    })
+
+    it('honours Retry-After header delay on 429', async () => {
+      const { c } = client(
+        [{ status: 429, body: '{"error":"rate limit exceeded"}', headers: { 'Retry-After': '0' } }],
+        0,
+      )
+      try {
+        await c.nodeInfo()
+        expect.unreachable('should fail')
+      } catch (err) {
+        expect(err).toBeInstanceOf(XeApiError)
+        expect((err as XeApiError).retryAfterMs).toBe(0)
+      }
     })
   })
 

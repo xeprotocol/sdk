@@ -20,12 +20,16 @@ export class XeApiError extends XeError {
   readonly status: number
   readonly retryable: boolean
   readonly body: unknown
+  readonly retryAfterMs?: number
 
-  constructor(message: string, status: number, retryable: boolean, body: unknown) {
+  constructor(message: string, status: number, retryable: boolean, body: unknown, retryAfterMs?: number) {
     super(message)
     this.status = status
     this.retryable = retryable
     this.body = body
+    if (retryAfterMs !== undefined) {
+      this.retryAfterMs = retryAfterMs
+    }
   }
 }
 
