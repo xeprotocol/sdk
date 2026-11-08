@@ -144,8 +144,28 @@ export function asBigInt(value: unknown, field: string): bigint {
  * without ever passing through a Number.
  */
 export function stringifyWithBigInts(value: unknown): string {
-  const marked = JSON.stringify(value, (_key, v: unknown) =>
-    typeof v === 'bigint' ? `__bigint__${v.toString()}` : v,
-  )
-  return marked.replace(/"__bigint__(-?\d+)"/g, '$1')
+  let tag = '__bigint__'
+  let hasBigInt = false
+  let collision = false
+  let marked = JSON.stringify(value, (key, v: unknown) => {
+    if (key.includes(tag)) collision = true
+    if (typeof v === 'bigint') {
+      hasBigInt = true
+      return `${tag}${v.toString()}`
+    }
+    if (typeof v === 'string' && v.includes(tag)) {
+      collision = true
+    }
+    return v
+  })
+  if (!hasBigInt) return marked
+  if (collision) {
+    while (marked.includes(tag)) {
+      tag += '_'
+    }
+    marked = JSON.stringify(value, (_key, v: unknown) =>
+      typeof v === 'bigint' ? `${tag}${v.toString()}` : v,
+    )
+  }
+  return marked.replace(new RegExp(`"${tag}(-?\\d+)"`, 'g'), '$1')
 }
