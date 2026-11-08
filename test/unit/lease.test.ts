@@ -223,7 +223,7 @@ describe('rentLease', () => {
   const opts = { provider: toAddress('c'.repeat(64)), vcpus: 1, memoryMb: 1024, diskGb: 1, durationSecs: 60 }
   const timeout = () => new XeApiError('still created after timeout', 503, true, null)
 
-  function setup(outcomes: Array<'accept' | 'timeout'>, cancelRace = false) {
+  function setup(outcomes: Array<'accept' | 'timeout' | 'nonretryable'>, cancelRace = false) {
     const xe = new Xe({ client: 'http://node.test', wallet: Wallet.create() })
     let n = 0
     const opened: string[] = []
@@ -237,6 +237,7 @@ describe('rentLease', () => {
       if (states.includes('cancelled')) return { state: 'cancelled' } as LeaseRecord
       const outcome = outcomes[opened.indexOf(hash)]
       if (outcome === 'accept') return { hash, state: 'accepted' } as LeaseRecord
+      if (outcome === 'nonretryable') throw new XeApiError('bad request', 400, false, null)
       throw timeout()
     })
     vi.spyOn(xe, 'cancelLease').mockImplementation(async (hash) => {
@@ -274,6 +275,22 @@ describe('rentLease', () => {
     const { xe, cancelled } = setup(['timeout', 'timeout'])
     await expect(xe.rentLease(opts, { acceptTimeoutMs: 1, attempts: 2 })).rejects.toThrow(/timeout/)
     expect(cancelled).toHaveLength(2)
+  })
+
+  it('cancels the lease before throwing on a non-retryable wait error', async () => {
+    const { xe, opened, cancelled } = setup(['nonretryable'])
+    await expect(xe.rentLease(opts)).rejects.toThrow(/bad request/)
+    expect(cancelled).toEqual([opened[0]])
+  })
+
+  it('handles terminal state wait error and re-throws the terminal state error', async () => {
+    const xe = new Xe({ client: 'http://node.test', wallet: Wallet.create() })
+    const openedHash = toHash('1'.repeat(64))
+    vi.spyOn(xe, 'openLease').mockResolvedValue({ hash: openedHash, accepted: true, cost: 1n, certificate: {} as never })
+    vi.spyOn(xe, 'waitForLease').mockRejectedValue(new XeUsageError('lease ended unfulfilled while waiting for accepted'))
+    vi.spyOn(xe, 'cancelLease').mockRejectedValue(new XeUsageError('cancelLease: lease is unfulfilled'))
+    vi.spyOn(xe.client, 'lease').mockResolvedValue({ hash: openedHash, state: 'unfulfilled' } as LeaseRecord)
+    await expect(xe.rentLease(opts)).rejects.toThrow(/lease ended unfulfilled/)
   })
 })
 

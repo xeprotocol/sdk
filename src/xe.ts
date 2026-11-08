@@ -319,20 +319,31 @@ export class Xe {
     let lastError: unknown
     for (let attempt = 1; attempt <= attempts; attempt++) {
       const opened = await this.openLease(options)
+      let waitErr: unknown
       try {
         const lease = await this.waitForLease(opened.hash, ['accepted'], { timeoutMs: retry.acceptTimeoutMs ?? 60_000 })
         return { lease, opened, attempts: attempt }
       } catch (err) {
+        waitErr = err
         lastError = err
-        if (!(err instanceof XeApiError && err.retryable)) throw err
       }
       try {
         await this.cancelLease(opened.hash)
         await this.waitForLease(opened.hash, ['cancelled'], { timeoutMs: 30_000 })
-      } catch (err) {
-        const lease = await this.client.lease(opened.hash)
-        if (lease.state === 'accepted') return { lease, opened, attempts: attempt }
-        throw err
+      } catch (cancelErr) {
+        try {
+          const lease = await this.client.lease(opened.hash)
+          if (lease.state === 'accepted') return { lease, opened, attempts: attempt }
+        } catch {
+          // ignore error fetching lease status
+        }
+        if (!(waitErr instanceof XeApiError && waitErr.retryable)) {
+          throw waitErr
+        }
+        throw cancelErr
+      }
+      if (!(waitErr instanceof XeApiError && waitErr.retryable)) {
+        throw waitErr
       }
     }
     throw lastError
