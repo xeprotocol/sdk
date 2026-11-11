@@ -192,11 +192,32 @@ export class XeClient {
 
     if (!res.ok) {
       const rec = (body ?? {}) as Record<string, unknown>
-      const message = typeof rec['error'] === 'string' ? rec['error'] : `HTTP ${res.status}`
+      let message = `HTTP ${res.status}`
+      let code: string | undefined
+      let hint: string | undefined
+
+      if (typeof rec['error'] === 'string') {
+        message = rec['error']
+      } else if (typeof rec['error'] === 'object' && rec['error'] !== null) {
+        const errObj = rec['error'] as Record<string, unknown>
+        if (typeof errObj['code'] === 'string') code = errObj['code']
+        if (typeof errObj['hint'] === 'string') hint = errObj['hint']
+        if (typeof errObj['message'] === 'string' && errObj['message']) {
+          message = errObj['message']
+          if (hint) {
+            message = `${message} (${hint})`
+          }
+        } else if (hint) {
+          message = hint
+        }
+      } else if (typeof rec['message'] === 'string' && rec['message']) {
+        message = rec['message']
+      }
+
       // The node classifies block-submission failures itself; trust that flag
       // when present and fall back to the status class when it is not.
       const retryable = typeof rec['retryable'] === 'boolean' ? rec['retryable'] : res.status >= 500
-      throw new XeApiError(message, res.status, retryable, body)
+      throw new XeApiError(message, res.status, retryable, body, code, hint)
     }
     return body as T
   }

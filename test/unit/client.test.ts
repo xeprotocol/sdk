@@ -44,6 +44,35 @@ describe('XeClient', () => {
       await expect(c.nodeInfo()).rejects.toThrow('invalid signature')
     })
 
+    it('surfaces structured proxy error message, code, and hint (#77)', async () => {
+      const proxyErrorBody = JSON.stringify({
+        error: {
+          code: 'not_found',
+          status: 404,
+          message: 'No API route at /api/v1/no/such/route.',
+          hint: 'No route matches the requested path',
+        },
+      })
+      const { c } = client([{ status: 404, body: proxyErrorBody }])
+      try {
+        await c.nodeInfo()
+        expect.unreachable()
+      } catch (err) {
+        expect(err).toBeInstanceOf(XeApiError)
+        const apiErr = err as XeApiError
+        expect(apiErr.message).toContain('No API route at /api/v1/no/such/route.')
+        expect(apiErr.message).toContain('No route matches the requested path')
+        expect(apiErr.code).toBe('not_found')
+        expect(apiErr.hint).toBe('No route matches the requested path')
+        expect(apiErr.status).toBe(404)
+      }
+    })
+
+    it('surfaces top-level message if error is absent', async () => {
+      const { c } = client([{ status: 400, body: '{"message":"custom bad request"}' }])
+      await expect(c.nodeInfo()).rejects.toThrow('custom bad request')
+    })
+
     it('surfaces an unparseable body rather than swallowing it', async () => {
       const { c } = client([{ status: 502, body: '<html>bad gateway</html>' }])
       await expect(c.nodeInfo()).rejects.toThrow(/bad gateway/)
