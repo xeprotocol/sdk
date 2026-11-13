@@ -6,12 +6,21 @@ import { concatBytes, hexToBytes, u64be } from './hex.js'
 import type { Attestation, Hash, PublicKey } from './types.js'
 import { verifySignature } from './wallet.js'
 
+const MAX_INT64 = (1n << 63n) - 1n
+export const MAX_ATTESTATIONS_PER_BLOCK = 20
+
 /** sha256(lease_hash_bytes || timestamp_be8) — what a timekeeper signs. */
 export function attestationPayload(leaseHash: Hash, timestamp: bigint): Uint8Array {
-  return sha256(concatBytes(hexToBytes(leaseHash, 32), u64be(BigInt.asUintN(64, timestamp))))
+  if (timestamp < 0n || timestamp > MAX_INT64) {
+    throw new XeUsageError('attestation timestamp out of int64 range')
+  }
+  return sha256(concatBytes(hexToBytes(leaseHash, 32), u64be(timestamp)))
 }
 
 export function verifyAttestation(att: Attestation, leaseHash: Hash): boolean {
+  if (att.timestamp < 0n || att.timestamp > MAX_INT64) {
+    return false
+  }
   try {
     return verifySignature(att.publicKey, attestationPayload(leaseHash, att.timestamp), att.signature)
   } catch {
@@ -25,6 +34,11 @@ export function verifyAttestation(att: Attestation, leaseHash: Hash): boolean {
  */
 export function attestedTime(atts: Attestation[]): bigint {
   if (atts.length === 0) throw new XeUsageError('attestedTime: no attestations')
+  for (const a of atts) {
+    if (a.timestamp < 0n || a.timestamp > MAX_INT64) {
+      throw new XeUsageError('attestedTime: timestamp out of int64 range')
+    }
+  }
   const sorted = atts.map((a) => a.timestamp).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
   return sorted[Math.floor((sorted.length - 1) / 2)]!
 }
@@ -47,14 +61,16 @@ export async function discoverTimekeepers(
   set: TimekeeperSet,
   candidates: (XeClient | string)[],
 ): Promise<Timekeeper[]> {
-  const wanted = new Set<string>(set.keys)
+  const wanted = new Set<string>(set.keys.map((k) => k.toLowerCase()))
   const found = await Promise.all(
     candidates.map(async (c) => {
       const client = c instanceof XeClient ? c : new XeClient({ url: c, retries: 1, timeoutMs: 10_000 })
       try {
         const info = await client.nodeInfo()
         const key = info['public_key']
-        return typeof key === 'string' && wanted.has(key) ? { publicKey: key as PublicKey, client } : null
+        if (typeof key !== 'string') return null
+        const norm = key.toLowerCase()
+        return wanted.has(norm) ? { publicKey: norm as PublicKey, client } : null
       } catch {
         return null
       }
@@ -62,8 +78,10 @@ export async function discoverTimekeepers(
   )
   const seen = new Set<string>()
   return found.filter((t): t is Timekeeper => {
-    if (!t || seen.has(t.publicKey)) return false
-    seen.add(t.publicKey)
+    if (!t) return false
+    const id = `${t.publicKey}@${t.client.url}`
+    if (seen.has(id)) return false
+    seen.add(id)
     return true
   })
 }
@@ -81,28 +99,59 @@ export async function gatherAttestations(
   set: TimekeeperSet,
   timekeepers: Timekeeper[],
 ): Promise<Attestation[]> {
-  if (timekeepers.length < set.threshold) {
+  if (
+    !Number.isInteger(set.threshold) ||
+    set.threshold <= 0 ||
+    set.threshold > MAX_ATTESTATIONS_PER_BLOCK
+  ) {
+    throw new XeUsageError(`invalid timekeeper threshold ${set.threshold}`)
+  }
+  const wanted = new Set<string>(set.keys.map((k) => k.toLowerCase()))
+  const trusted = timekeepers.filter((tk) => wanted.has(tk.publicKey.toLowerCase()))
+  const distinctKeys = new Set(trusted.map((tk) => tk.publicKey.toLowerCase()))
+  if (distinctKeys.size < set.threshold) {
     throw new XeUsageError(
-      `only ${timekeepers.length} reachable timekeeper(s), need ${set.threshold} — pass more timekeeper URLs`,
+      `only ${distinctKeys.size} reachable timekeeper(s), need ${set.threshold}` +
+        ' — pass more timekeeper URLs',
     )
   }
   const errors: string[] = []
   const results = await Promise.all(
-    timekeepers.map(async (tk) => {
+    trusted.map(async (tk) => {
       try {
         const att = await tk.client.requestAttestation(leaseHash)
-        if (att.publicKey !== tk.publicKey || !verifyAttestation(att, leaseHash)) {
+        if (typeof att.publicKey !== 'string') {
+          errors.push(`${tk.client.url}: attestation missing public key`)
+          return null
+        }
+        const pub = att.publicKey.toLowerCase() as PublicKey
+        if (pub !== tk.publicKey.toLowerCase() || !wanted.has(pub)) {
+          errors.push(`${tk.client.url}: attestation public key mismatch`)
+          return null
+        }
+        const normAtt: Attestation = { ...att, publicKey: pub }
+        if (!verifyAttestation(normAtt, leaseHash)) {
           errors.push(`${tk.client.url}: attestation did not verify`)
           return null
         }
-        return att
+        return normAtt
       } catch (err) {
         errors.push(`${tk.client.url}: ${(err as Error).message}`)
         return { failed: err }
       }
     }),
   )
-  const atts = results.filter((r): r is Attestation => r !== null && !('failed' in r))
+  const seenKeys = new Set<string>()
+  const uniqueAtts: Attestation[] = []
+  for (const r of results) {
+    if (r !== null && !('failed' in r)) {
+      if (!seenKeys.has(r.publicKey)) {
+        seenKeys.add(r.publicKey)
+        uniqueAtts.push(r)
+      }
+    }
+  }
+  const atts = uniqueAtts.slice(0, MAX_ATTESTATIONS_PER_BLOCK)
   if (atts.length >= set.threshold) return atts
   // Retryable if any refusal was: a timekeeper rate-limits each lease for a
   // short window, and a lease it has not yet seen is refused until it syncs.
