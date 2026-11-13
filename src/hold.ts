@@ -83,7 +83,11 @@ export async function holdLease(xe: Xe, leaseHash: Hash, options: HoldOptions = 
     await sleepUntil(renewAt, options.signal)
     if (options.signal?.aborted) continue
 
-    const step = totalSecs === undefined ? renewSecs : minBig(renewSecs, totalSecs - lease.effectiveDuration)
+    let step = totalSecs === undefined ? renewSecs : minBig(renewSecs, totalSecs - lease.effectiveDuration)
+    if (renewSecs % 60n === 0n) {
+      step -= step % 60n
+      if (step <= 0n) return done('target-reached')
+    }
     const before = lease.effectiveDuration
     let renewal: RenewedLease
     try {
@@ -91,6 +95,9 @@ export async function holdLease(xe: Xe, leaseHash: Hash, options: HoldOptions = 
     } catch (err) {
       if (err instanceof XePriceError) return done('price-changed')
       if (err instanceof XeBudgetError) return done('budget-reached')
+      if (err instanceof XeUsageError && err.message.includes('whole number of minutes')) {
+        return done('target-reached')
+      }
       throw err
     }
     renewals.push(renewal)

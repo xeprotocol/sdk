@@ -7,7 +7,7 @@ import { toLeaseRecord, toWire } from '../../src/client.js'
 import { holdLease, type HoldEvent } from '../../src/hold.js'
 import { bytesToHex } from '../../src/hex.js'
 import { parseLossless } from '../../src/json.js'
-import { leaseCost } from '../../src/lease.js'
+import { leaseCost, requireWholeMinutes } from '../../src/lease.js'
 import { toAddress, toHash, toPublicKey, type Attestation, type Hash, type SignedBlock } from '../../src/types.js'
 import type { LeaseRecord } from '../../src/client.js'
 import { Xe, type RenewedLease } from '../../src/xe.js'
@@ -104,8 +104,9 @@ describe('lease wire form', () => {
 
 describe('holdLease', () => {
   /** A fake ledger: one accepted lease that each renewal extends. */
-  function fakeXe(opts: { failFirst?: number; price?: () => bigint } = {}) {
+  function fakeXe(opts: { failFirst?: number; price?: () => bigint; enforceWholeMinutes?: boolean; initialDuration?: bigint } = {}) {
     const price = opts.price ?? (() => 1n)
+    const initialDuration = opts.initialDuration ?? 1n
     const start = BigInt(Date.now()) * 1_000_000n
     const lease: LeaseRecord = {
       hash: toHash('a'.repeat(64)),
@@ -115,13 +116,13 @@ describe('holdLease', () => {
       vcpus: 1n,
       memoryMb: 1024n,
       diskGb: 1n,
-      duration: 1n,
+      duration: initialDuration,
       cost: 1n,
       startTime: start,
       settled: false,
       certificateHash: '',
       renewals: [],
-      effectiveDuration: 1n,
+      effectiveDuration: initialDuration,
       effectiveExpiry: start + 1_000_000_000n,
       raw: {},
     }
@@ -132,6 +133,9 @@ describe('holdLease', () => {
       lease: async () => ({ ...lease, renewals: [...lease.renewals] }),
       openingPricePerMinute: async () => 1n,
       renewLease: async (hash: Hash, secs: bigint, guards: { maxPricePerMinute?: bigint; budget?: bigint } = {}): Promise<RenewedLease> => {
+        if (opts.enforceWholeMinutes) {
+          requireWholeMinutes(secs, 'renewLease')
+        }
         const cost = price()
         if (guards.maxPricePerMinute !== undefined && cost > guards.maxPricePerMinute) {
           throw new XePriceError(lease.provider, cost, guards.maxPricePerMinute)
@@ -216,6 +220,23 @@ describe('holdLease', () => {
     const result = await holdLease(xe, lease.hash, { renewSecs: 1, totalSecs: 10, signal: ac.signal })
     expect(result.reason).toBe('aborted')
     expect(result.renewals).toHaveLength(0)
+  })
+
+  it('completes cleanly when totalSecs is not an exact multiple of renewSecs without throwing XeUsageError', async () => {
+    const { xe, lease } = fakeXe({ enforceWholeMinutes: true, initialDuration: 60n })
+    const result = await holdLease(xe, lease.hash, { renewSecs: 60, totalSecs: 90, leadMs: 400 })
+    expect(result.reason).toBe('target-reached')
+    expect(result.renewals).toHaveLength(0)
+    expect(result.lease.effectiveDuration).toBe(60n)
+  })
+
+  it('maps XeUsageError whole-minute failure to target-reached if thrown by renewLease', async () => {
+    const { xe, lease } = fakeXe({ initialDuration: 60n })
+    xe.renewLease = async () => {
+      throw new XeUsageError('renewLease: duration must be a whole number of minutes (a multiple of 60s), got 30s')
+    }
+    const result = await holdLease(xe, lease.hash, { renewSecs: 30, totalSecs: 90, leadMs: 400 })
+    expect(result.reason).toBe('target-reached')
   })
 })
 
