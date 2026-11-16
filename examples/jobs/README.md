@@ -44,8 +44,8 @@ full in [Budgets and prices](../../docs/budgets.md).
 interface JobOptions {
   machine: { vcpus: number; memoryMb: number; diskGb: number }
   provider?: Address                            // default: cheapest leasable provider within the ceiling (interim — see below)
-  maxPricePerMinute?: bigint                    // micro-XUSD; refuse dearer, and the renewal ceiling (default: the opening price)
-  budget?: bigint                               // micro-XUSD; the most the whole job may cost
+  maxPricePerMinute?: bigint                    // micro-XCU; refuse dearer, and the renewal ceiling (default: the opening price)
+  budget?: bigint                               // micro-XCU; the most the whole job may cost
   files?: Record<string, string | Uint8Array>   // written into the job directory before anything runs
   setup?: string                                // shell, run first; its failure fails the job
   run: string                                   // shell, run in the job directory
@@ -76,9 +76,9 @@ interface JobResult {
   lease: Hash
   provider: Address
   wallMs: number
-  pricePerMinute: bigint         // micro-XUSD, the price the job opened at
+  pricePerMinute: bigint         // micro-XCU, the price the job opened at
   billedMinutes: number
-  paid: bigint                   // micro-XUSD: first minute + every renewal
+  paid: bigint                   // micro-XCU: first minute + every renewal
 }
 ```
 

@@ -15,12 +15,12 @@ export interface HoldOptions {
   /** Retry spacing for retryable failures. Default 4s. */
   retryMs?: number
   /**
-   * micro-XUSD per minute a renewal may cost. Default: the price the lease was
+   * micro-XCU per minute a renewal may cost. Default: the price the lease was
    * opened at — a provider that raises its price does not get renewed
    * (`reason: 'price-changed'`) unless this allows the new price.
    */
   maxPricePerMinute?: bigint
-  /** micro-XUSD the whole lease may cost; renewing stops before it would pass this (`reason: 'budget-reached'`). */
+  /** micro-XCU the whole lease may cost; renewing stops before it would pass this (`reason: 'budget-reached'`). */
   budget?: bigint
   /** Abort to stop renewing; the lease then runs out at its current expiry. */
   signal?: AbortSignal
@@ -40,7 +40,7 @@ export interface HoldResult {
   lease: LeaseRecord
   renewals: RenewedLease[]
   reason: HoldReason
-  /** micro-XUSD escrowed for the lease: first term plus every renewal. */
+  /** micro-XCU escrowed for the lease: first term plus every renewal. */
   paid: bigint
 }
 

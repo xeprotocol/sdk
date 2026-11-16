@@ -3,13 +3,13 @@
 **You will:** find a provider, price a machine exactly as the network will, rent
 it, and read the lease back.
 
-**Time:** 10 minutes · **Needs:** a wallet holding **XUSD** · **Costs:** fractions of a cent of testnet XUSD
+**Time:** 10 minutes · **Needs:** a wallet holding **XCU** · **Costs:** well under 0.01 testnet XCU
 
 ## How renting works
 
 A **lease** rents a virtual machine from a **provider** for a fixed term:
 
-1. You post a `lease` block. It escrows the full cost in XUSD and names the
+1. You post a `lease` block. It escrows the full cost in XCU and names the
    provider, the machine's size, the term, and the SSH key the machine should
    accept.
 2. The provider's node decides whether to take it. Nothing is reserved until it
@@ -19,13 +19,13 @@ A **lease** rents a virtual machine from a **provider** for a fixed term:
 4. When the term ends the provider **settles**: your escrow is spent, and the
    provider earns newly minted XE.
 
-Leases are priced in **XUSD**, never XE, so the price of compute does not move
+Leases are priced in **XCU**, never XE, so the price of compute does not move
 with XE's market price.
 
-> **Getting testnet XUSD.** XUSD is issued only by the network's authorised
-> minter, and the testnet faucet hands out XE, not XUSD. There is no self-serve
-> XUSD on the testnet yet — ask the network operators for some for your address.
-> A few cents lasts a long time: a small machine costs about 0.0005 XUSD a minute.
+> **Getting testnet XCU.** XCU is issued only by the network's authorised
+> minter, and the testnet faucet hands out XE, not XCU. There is no self-serve
+> XCU on the testnet yet — ask the network operators for some for your address.
+> A small amount lasts a long time: a small machine costs about 0.0005 XCU a minute.
 
 ## Find a provider
 
@@ -56,7 +56,7 @@ and GB of disk, billed in **whole minutes**, times the provider's multiplier.
 import { fromMicro, leaseCost } from '@xeprotocol/sdk'
 
 const perMinute = leaseCost({ vcpus: 1n, memoryMb: 1024n, diskGb: 1n }, 60n, cert.priceMultiplierMilli)
-console.log(`${fromMicro(perMinute)} XUSD per minute`)
+console.log(`${fromMicro(perMinute)} XCU per minute`)
 ```
 
 ## Rent it
@@ -110,7 +110,7 @@ import { Wallet, Xe, fromMicro, leaseCost, type Address } from '@xeprotocol/sdk'
 const NODE = process.env['XE_NODE'] ?? 'https://ldn.core.test.network'
 const xe = new Xe({ client: NODE, wallet: Wallet.fromSeedHex(readFileSync('wallet.seed', 'utf8').trim()) })
 
-console.log(`XUSD ${fromMicro(await xe.balance('XUSD'))}`)
+console.log(`XCU ${fromMicro(await xe.balance('XCU'))}`)
 
 // The first provider with a current certificate.
 const now = BigInt(Date.now()) * 1_000_000n
@@ -131,7 +131,7 @@ for (const p of await xe.client.providers()) {
 if (!provider) throw new Error('no provider can be leased right now')
 
 const size = { vcpus: 1n, memoryMb: 1024n, diskGb: 1n }
-console.log(`provider ${provider}: ${fromMicro(leaseCost(size, 60n, multiplier))} XUSD per minute`)
+console.log(`provider ${provider}: ${fromMicro(leaseCost(size, 60n, multiplier))} XCU per minute`)
 
 const { lease, opened } = await xe.rentLease({
   provider,
@@ -139,7 +139,7 @@ const { lease, opened } = await xe.rentLease({
   durationSecs: 60,
   accessPubKey: Wallet.create().publicKey,
 })
-console.log(`lease ${opened.hash}: ${lease.state}, cost ${fromMicro(opened.cost)} XUSD`)
+console.log(`lease ${opened.hash}: ${lease.state}, cost ${fromMicro(opened.cost)} XCU`)
 console.log(`runs ${new Date(Number(lease.startTime / 1_000_000n)).toISOString()} → ${new Date(Number(lease.effectiveExpiry / 1_000_000n)).toISOString()}`)
 ```
 

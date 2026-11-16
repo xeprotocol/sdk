@@ -1,6 +1,6 @@
 import { XeUsageError } from './errors.js'
 
-/** micro-XUSD per unit per hour. Consensus constants: a lease priced differently is rejected. */
+/** micro-XCU per unit per hour. Consensus constants: a lease priced differently is rejected. */
 export const LEASE_VCPU_RATE = 20_000n
 export const LEASE_MEM_GB_RATE = 10_000n
 export const LEASE_DISK_GB_RATE = 1_000n
@@ -13,7 +13,7 @@ export interface LeaseDimensions {
 
 const ceilDiv = (a: bigint, b: bigint): bigint => (a + b - 1n) / b
 
-/** micro-XUSD for one billing minute of this machine at this multiplier. */
+/** micro-XCU for one billing minute of this machine at this multiplier. */
 export function pricePerMinute(dims: LeaseDimensions, multiplierMilli: bigint): bigint {
   return leaseCost(dims, 60n, multiplierMilli)
 }
@@ -26,7 +26,7 @@ export function requireWholeMinutes(durationSecs: bigint, what: string): void {
 }
 
 /**
- * The exact cost the ledger will demand, in micro-XUSD.
+ * The exact cost the ledger will demand, in micro-XCU.
  *
  * Mirrors `core.LeaseCost` step for step, including where it rounds up: whole
  * minutes, whole GiB of memory, then the multiplier. The block must carry this

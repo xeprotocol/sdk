@@ -63,13 +63,13 @@ export class XeInsufficientFundsError extends XeUsageError {
 export class XePriceError extends XeUsageError {
   override readonly name = 'XePriceError'
   readonly provider: string
-  /** micro-XUSD per minute the provider asks. */
+  /** micro-XCU per minute the provider asks. */
   readonly price: bigint
-  /** micro-XUSD per minute the caller would pay at most. */
+  /** micro-XCU per minute the caller would pay at most. */
   readonly ceiling: bigint
 
   constructor(provider: string, price: bigint, ceiling: bigint) {
-    super(`provider ${provider.slice(0, 12)} asks ${price} micro-XUSD/min, above the ceiling of ${ceiling}`)
+    super(`provider ${provider.slice(0, 12)} asks ${price} micro-XCU/min, above the ceiling of ${ceiling}`)
     this.provider = provider
     this.price = price
     this.ceiling = ceiling
@@ -84,7 +84,7 @@ export class XeBudgetError extends XeUsageError {
   readonly budget: bigint
 
   constructor(paid: bigint, next: bigint, budget: bigint) {
-    super(`renewing would cost ${paid + next} micro-XUSD in total, over the budget of ${budget}`)
+    super(`renewing would cost ${paid + next} micro-XCU in total, over the budget of ${budget}`)
     this.paid = paid
     this.next = next
     this.budget = budget

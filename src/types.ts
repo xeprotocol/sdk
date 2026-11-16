@@ -44,7 +44,7 @@ export function toHash(value: string): Hash {
   return value as Hash
 }
 
-export type Asset = 'XE' | 'XUSD'
+export type Asset = 'XE' | 'XCU'
 
 export type BlockType =
   | 'send'

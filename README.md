@@ -118,7 +118,8 @@ genuinely has nothing — never that the request failed.
 
 ## Renting a machine
 
-A lease escrows XUSD with a provider for a fixed term. To pay only for the time
+A lease escrows XCU (XE Compute Unit, a prepaid compute credit) with a provider
+for a fixed term. To pay only for the time
 you use, keep the term short and **renew it a minute at a time** — nothing beyond
 the current minute is ever escrowed, so if you stop (or your process dies) the
 machine is released within a minute.
@@ -231,12 +232,12 @@ languages:
 ```sh
 npm run examples:check                         # type-check them, no network
 npm run examples:live                          # run tutorials 1–4 on the testnet
-XE_LEASE_SEED=<seed> npm run examples:live     # …and leasing (5–6), paid in XUSD
+XE_LEASE_SEED=<seed> npm run examples:live     # …and leasing (5–6), paid in XCU
 ```
 
 CI runs `examples:live` with a dedicated leasing wallet held in the
 `XE_LEASE_SEED` repository secret. **After every testnet reset that wallet
-starts at zero and must be refunded with XUSD** (by address; CI claims the
+starts at zero and must be refunded with XCU** (by address; CI claims the
 pending transfer itself). Until it is, the leasing tutorials fail in the
 `integration` job with the wallet's address and balance.
 

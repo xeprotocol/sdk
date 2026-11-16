@@ -35,9 +35,9 @@ export interface JobOptions {
   machine: JobMachine
   /** Default: the cheapest provider that can take the machine within `maxPricePerMinute`. */
   provider?: Address
-  /** micro-XUSD per minute. Refuse dearer providers; also the renewal ceiling (default: the opening price). */
+  /** micro-XCU per minute. Refuse dearer providers; also the renewal ceiling (default: the opening price). */
   maxPricePerMinute?: bigint
-  /** micro-XUSD the whole job may cost. A job needs this or `timeoutSecs`. */
+  /** micro-XCU the whole job may cost. A job needs this or `timeoutSecs`. */
   budget?: bigint
   /** Written into the job directory before anything runs. Paths are relative to it. */
   files?: Record<string, string | Uint8Array>
@@ -88,10 +88,10 @@ export interface JobResult {
   lease: Hash
   provider: Address
   wallMs: number
-  /** micro-XUSD per minute the job opened at. */
+  /** micro-XCU per minute the job opened at. */
   pricePerMinute: bigint
   billedMinutes: number
-  /** micro-XUSD: first minute + every renewal. */
+  /** micro-XCU: first minute + every renewal. */
   paid: bigint
 }
 
