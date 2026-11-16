@@ -18,7 +18,7 @@ describe('one wallet, concurrent writes', () => {
     let head = toHash('f'.repeat(64))
     const submitted: SignedBlock[] = []
     vi.spyOn(xe, 'networkId').mockResolvedValue('test-net')
-    vi.spyOn(xe.client, 'balances').mockImplementation(async () => ({ balances: { XE: 1_000n, XUSD: 1_000n } }) as never)
+    vi.spyOn(xe.client, 'balances').mockImplementation(async () => ({ balances: { XE: 1_000n, XCU: 1_000n } }) as never)
     vi.spyOn(xe.client, 'frontier').mockImplementation(async () => head)
     vi.spyOn(xe.client, 'submitBlock').mockImplementation(async (block: SignedBlock) => {
       await new Promise((r) => setTimeout(r, 20))

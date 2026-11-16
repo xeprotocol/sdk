@@ -49,7 +49,7 @@ export interface Machine {
 /** What one provider charges, right now, for one minute of a machine. */
 export interface Quote {
   provider: Address
-  /** micro-XUSD per billing minute. */
+  /** micro-XCU per billing minute. */
   pricePerMinute: bigint
   certificate: Certificate
   /** Unix nanoseconds; 0 means no expiry. */
@@ -58,16 +58,16 @@ export interface Quote {
 
 /** Checked before a renewal is signed; a renewal that fails one is never sent. */
 export interface RenewGuards {
-  /** micro-XUSD per minute. Above it, `XePriceError`. */
+  /** micro-XCU per minute. Above it, `XePriceError`. */
   maxPricePerMinute?: bigint
-  /** micro-XUSD for the lease's whole cost, first term plus every renewal. Over it, `XeBudgetError`. */
+  /** micro-XCU for the lease's whole cost, first term plus every renewal. Over it, `XeBudgetError`. */
   budget?: bigint
 }
 
 export interface OpenLeaseOptions {
   /** Omit to take the cheapest provider that can fit the machine within `maxPricePerMinute`. */
   provider?: Address
-  /** micro-XUSD per minute; a dearer provider is refused with `XePriceError` before signing. */
+  /** micro-XCU per minute; a dearer provider is refused with `XePriceError` before signing. */
   maxPricePerMinute?: bigint
   vcpus: bigint | number
   memoryMb: bigint | number
@@ -254,7 +254,7 @@ export class Xe {
   // --- leases ---
 
   /**
-   * Rent a machine: escrow XUSD for a lease against a provider's current
+   * Rent a machine: escrow XCU for a lease against a provider's current
    * certificate. The provider's node decides whether to accept; nothing is
    * reserved until it does. Use `waitForLease` to see which way it went.
    */
@@ -278,7 +278,7 @@ export class Xe {
     }
     const cost = leaseCost(dims, duration, certificate.priceMultiplierMilli)
     const result = await this.#serial(async () => {
-      const { current, previous } = await this.#position('XUSD', cost)
+      const { current, previous } = await this.#position('XCU', cost)
 
       const block: Block = {
         type: 'lease',
@@ -286,7 +286,7 @@ export class Xe {
         previous,
         balance: current - cost,
         timestamp: nowNs(),
-        asset: 'XUSD',
+        asset: 'XCU',
         destination: provider,
         amount: cost,
         vcpus: dims.vcpus,
@@ -464,7 +464,7 @@ export class Xe {
     }
     const epoch = await this.#epochAt(renewTime)
     const result = await this.#serial(async () => {
-      const { current, previous } = await this.#position('XUSD', cost)
+      const { current, previous } = await this.#position('XCU', cost)
 
       const block: Block = {
         type: 'lease_renew',
@@ -472,7 +472,7 @@ export class Xe {
         previous,
         balance: current - cost,
         timestamp: nowNs(),
-        asset: 'XUSD',
+        asset: 'XCU',
         source: leaseHash,
         amount: cost,
         duration,
@@ -495,14 +495,14 @@ export class Xe {
       throw new XeUsageError(`cancelLease: lease is ${lease.state}; only an unaccepted lease can be cancelled`)
     }
     return this.#serial(async () => {
-      const { current, previous } = await this.#position('XUSD', 0n)
+      const { current, previous } = await this.#position('XCU', 0n)
       return this.#finish({
         type: 'lease_cancel',
         account: this.address,
         previous,
         balance: current + lease.cost,
         timestamp: nowNs(),
-        asset: 'XUSD',
+        asset: 'XCU',
         source: leaseHash,
       })
     })
@@ -519,14 +519,14 @@ export class Xe {
     const escrow = lease.renewals.reduce((sum, r) => sum + r.cost, lease.cost)
     const attestations = await this.#attest(leaseHash)
     return this.#serial(async () => {
-      const { current, previous } = await this.#position('XUSD', 0n)
+      const { current, previous } = await this.#position('XCU', 0n)
       return this.#finish({
         type: 'lease_force_settle',
         account: this.address,
         previous,
         balance: current + escrow,
         timestamp: nowNs(),
-        asset: 'XUSD',
+        asset: 'XCU',
         source: leaseHash,
         attestations,
       })
@@ -604,7 +604,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 export type { Hash }
 
-/** micro-XUSD a lease has escrowed so far: its first term plus every renewal. */
+/** micro-XCU a lease has escrowed so far: its first term plus every renewal. */
 export function leasePaid(lease: LeaseRecord): bigint {
   return lease.renewals.reduce((sum, r) => sum + r.cost, lease.cost)
 }
