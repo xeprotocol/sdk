@@ -137,7 +137,7 @@ const xe = new Xe({ client: NODE, wallet })
 console.log(`network  ${await xe.networkId()}`)
 console.log(`address  ${xe.address}`)
 console.log(`XE       ${fromMicro(await xe.balance('XE'))}`)
-console.log(`XCU     ${fromMicro(await xe.balance('XCU'))}`)
+console.log(`XCU      ${fromMicro(await xe.balance('XCU'))}`)
 ```
 
 ```sh
