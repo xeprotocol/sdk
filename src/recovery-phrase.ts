@@ -3,8 +3,8 @@ import { wordlist } from '@scure/bip39/wordlists/english'
 import { hmac } from '@noble/hashes/hmac'
 import { sha512 } from '@noble/hashes/sha512'
 
-/** Provisional SLIP-0044 type. Changing it changes all phrase-derived accounts. */
-export const RECOVERY_PHRASE_COIN_TYPE = 1
+/** SLIP-0044 type. Changing it changes all phrase-derived accounts. */
+export const RECOVERY_PHRASE_COIN_TYPE = 22597
 
 export type PhraseErrorCode = 'word_count' | 'unknown_word' | 'checksum' | 'account'
 

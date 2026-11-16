@@ -40,8 +40,8 @@ console.log(wallet.publicKey) // the key that signs for it
 > sends it anywhere. Your keys stay in your process; nodes only ever see signed
 > blocks.
 
-The phrase is standard BIP39 + SLIP-0010 ed25519 at `m/44'/1'/account'`.
-Coin type 1 is provisional; account defaults to 0. Import accepts 12, 15, 18, 21
+The phrase is standard BIP39 + SLIP-0010 ed25519 at `m/44'/22597'/account'`.
+The coin type is 22597; account defaults to 0. Import accepts 12, 15, 18, 21
 or 24 words. The phrase is your only backup unless you save the signing seed
 separately. It cannot be recovered from the signing seed.
 

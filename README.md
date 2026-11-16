@@ -276,9 +276,9 @@ words or throws `PhraseError` with a typed `code`: `word_count`, `unknown_word`
 Errors never contain the entered words.
 
 Import accepts 12, 15, 18, 21 and 24 words. XE uses standard BIP39
-PBKDF2-HMAC-SHA512 and SLIP-0010 ed25519 at `m/44'/1'/account'`, all hardened.
-Account indices range from 0 through 2147483647. Coin type 1 is provisional;
-changing it changes every derived account. The address rule is unchanged.
+PBKDF2-HMAC-SHA512 and SLIP-0010 ed25519 at `m/44'/22597'/account'`, all
+hardened. Account indices range from 0 through 2147483647. The coin type is
+22597. The address rule is unchanged.
 
 The recovery phrase is your only backup unless you separately save `seedHex()`.
 Anyone with the backup controls the account. Only opt into a BIP39 passphrase

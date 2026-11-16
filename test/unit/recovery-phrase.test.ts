@@ -24,7 +24,7 @@ describe('recovery phrase v2', () => {
   it('pins the shared file and English wordlist', () => {
     expect(vectors.version).toBe(2)
     expect(vectors.coin_type).toBe(RECOVERY_PHRASE_COIN_TYPE)
-    expect(vectors.coin_type_provisional).toBe(true)
+    expect(vectors.coin_type_provisional).toBe(false)
     expect(vectors.bip39).toHaveLength(24)
     expect(vectors.slip10_ed25519).toHaveLength(12)
     expect(vectors.xe).toHaveLength(10)
