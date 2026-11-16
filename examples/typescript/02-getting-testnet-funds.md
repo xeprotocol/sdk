@@ -96,10 +96,10 @@ console.log(`XE balance ${fromMicro(await xe.balance('XE'))}, all spendable`)
 node get-funds.ts
 ```
 
-## What about XUSD?
+## What about XCU?
 
-XE is the network's native coin. **Compute is paid in XUSD**, a USD-pegged
-stablecoin issued only by the network's authorised minter. The testnet faucet
+XE is the network's native coin. **Compute is paid in XCU** (XE Compute Unit), a prepaid
+compute credit issued only by the network's authorised minter. The testnet faucet
 does not hand it out; see [5. Renting a machine](05-renting-a-machine.md).
 
 **Next:** [3. Sending XE](03-sending-xe.md)

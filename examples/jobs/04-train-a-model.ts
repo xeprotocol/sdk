@@ -94,7 +94,7 @@ const job = await runJob(xe, {
 })
 
 console.log(`${job.status} after ${(job.wallMs / 60_000).toFixed(1)} min`)
-console.log(`${fromMicro(job.pricePerMinute)} XUSD/min × ${job.billedMinutes} min = ${fromMicro(job.paid)} of ${fromMicro(BUDGET)} XUSD budget`)
+console.log(`${fromMicro(job.pricePerMinute)} XCU/min × ${job.billedMinutes} min = ${fromMicro(job.paid)} of ${fromMicro(BUDGET)} XCU budget`)
 if (job.status === 'budget-reached') console.log('the budget ran out before training finished — raise BUDGET to train longer')
 if (job.status === 'price-changed') console.log('the provider raised its price mid-job, so renewing stopped')
 if (job.files.some((f) => f.path === 'model.pkl')) {

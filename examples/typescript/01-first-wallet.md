@@ -100,7 +100,7 @@ before every write, signs locally, solves the proof of work and submits.
 
 ## Amounts are integers
 
-XE and XUSD both have six decimal places, and every amount in the SDK is an
+XE and XCU both have six decimal places, and every amount in the SDK is an
 integer number of **micro-units** held in a `bigint`:
 
 ```ts
@@ -137,7 +137,7 @@ const xe = new Xe({ client: NODE, wallet })
 console.log(`network  ${await xe.networkId()}`)
 console.log(`address  ${xe.address}`)
 console.log(`XE       ${fromMicro(await xe.balance('XE'))}`)
-console.log(`XUSD     ${fromMicro(await xe.balance('XUSD'))}`)
+console.log(`XCU     ${fromMicro(await xe.balance('XCU'))}`)
 ```
 
 ```sh

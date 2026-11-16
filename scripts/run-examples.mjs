@@ -8,13 +8,13 @@
 // and so its own wallet.seed, exactly as a reader following along would.
 //
 // Tutorials 1–4 need nothing: the faucet funds the wallet. Leasing (5–6) and
-// the short job programs (examples/jobs 01, 03) are paid in XUSD, which the faucet does not hand out, so those run only when
+// the short job programs (examples/jobs 01, 03) are paid in XCU, which the faucet does not hand out, so those run only when
 // XE_LEASE_SEED names a wallet that holds some; otherwise they are skipped.
-// Pending XUSD sent to that wallet is claimed first, so it can be refunded by
+// Pending XCU sent to that wallet is claimed first, so it can be refunded by
 // address alone.
 //
 //   npm run build && npm run examples:live
-//   XE_LEASE_SEED=<hex seed holding XUSD> npm run examples:live
+//   XE_LEASE_SEED=<hex seed holding XCU> npm run examples:live
 //
 // XE_PROVIDERS=<account>[,<account>] limits the providers the programs see to
 // those accounts (scripts/pin-providers.mjs), so leases go only to providers
@@ -48,9 +48,9 @@ let failed = 0
 let skipped = 0
 rmSync(out, { recursive: true, force: true })
 
-// Enough for both languages' leasing tutorials (~0.003 XUSD) and the two job
-// programs (budgets 0.01 + 0.02 XUSD, ~0.002 spent) with headroom.
-const MIN_LEASE_XUSD = 50_000n
+// Enough for both languages' leasing tutorials (~0.003 XCU) and the two job
+// programs (budgets 0.01 + 0.02 XCU, ~0.002 spent) with headroom.
+const MIN_LEASE_XCU = 50_000n
 
 /**
  * Claim anything sent to the leasing wallet and check it can pay. It is refunded
@@ -62,15 +62,15 @@ async function prepareLeaseWallet(seed) {
   const xe = new Xe({ client: process.env['XE_NODE'] ?? 'https://ldn.core.test.network', wallet: Wallet.fromSeedHex(seed) })
   const claimed = await xe.receiveAll()
   const deadline = Date.now() + 60_000
-  while ((await xe.spendable('XUSD')) < (await xe.balance('XUSD')) && Date.now() < deadline) {
+  while ((await xe.spendable('XCU')) < (await xe.balance('XCU')) && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 1_000))
   }
-  const xusd = await xe.spendable('XUSD')
-  console.log(`leasing wallet ${xe.address}: ${fromMicro(xusd)} XUSD spendable (claimed ${claimed.length} pending)`)
-  if (xusd < MIN_LEASE_XUSD) {
+  const xcu = await xe.spendable('XCU')
+  console.log(`leasing wallet ${xe.address}: ${fromMicro(xcu)} XCU spendable (claimed ${claimed.length} pending)`)
+  if (xcu < MIN_LEASE_XCU) {
     throw new Error(
-      `leasing wallet ${xe.address} holds ${fromMicro(xusd)} XUSD, needs ${fromMicro(MIN_LEASE_XUSD)} — ` +
-        'refund it with XUSD (after a testnet reset it starts at zero)',
+      `leasing wallet ${xe.address} holds ${fromMicro(xcu)} XCU, needs ${fromMicro(MIN_LEASE_XCU)} — ` +
+        'refund it with XCU (after a testnet reset it starts at zero)',
     )
   }
 }
@@ -94,7 +94,7 @@ for (const lang of ['typescript', 'javascript']) {
     for (const [, , file, body] of readFileSync(join(dir, name), 'utf8').matchAll(FENCE)) {
       const label = `${lang}/${name}`
       if (LEASING.test(name) && !leaseReady) {
-        console.log(`SKIP: ${label} — leasing needs XUSD; ${leaseSeed ? 'the leasing wallet is not ready (above)' : 'set XE_LEASE_SEED to run it'}`)
+        console.log(`SKIP: ${label} — leasing needs XCU; ${leaseSeed ? 'the leasing wallet is not ready (above)' : 'set XE_LEASE_SEED to run it'}`)
         skipped++
         continue
       }
@@ -129,7 +129,7 @@ mkdirSync(jobsCwd, { recursive: true })
 for (const file of JOBS) {
   const label = `jobs/${file}`
   if (!leaseReady) {
-    console.log(`SKIP: ${label} — jobs are paid in XUSD; ${leaseSeed ? 'the leasing wallet is not ready (above)' : 'set XE_LEASE_SEED to run it'}`)
+    console.log(`SKIP: ${label} — jobs are paid in XCU; ${leaseSeed ? 'the leasing wallet is not ready (above)' : 'set XE_LEASE_SEED to run it'}`)
     skipped++
     continue
   }

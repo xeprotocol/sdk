@@ -6,7 +6,7 @@
 //
 // Uses only the Python standard library on the machine, so it needs no
 // internet there. The price ceiling rules out any provider dearer than
-// 0.002 XUSD a minute; the budget caps the whole job at 0.02 XUSD.
+// 0.002 XCU a minute; the budget caps the whole job at 0.02 XCU.
 //
 //   ROWS=500000 node 03-data-processing.ts
 
@@ -94,4 +94,4 @@ if (job.status !== 'succeeded') {
 
 const report = JSON.parse(readFileSync('./results/report.json', 'utf8')) as { rows: number; revenue: number; top_product: string }
 console.log(`${report.rows} rows → revenue ${report.revenue.toLocaleString()}, best seller: ${report.top_product}`)
-console.log(`summary in ./results/summary.csv — job took ${(job.wallMs / 1000).toFixed(1)}s, paid ${fromMicro(job.paid)} XUSD`)
+console.log(`summary in ./results/summary.csv — job took ${(job.wallMs / 1000).toFixed(1)}s, paid ${fromMicro(job.paid)} XCU`)

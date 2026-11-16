@@ -90,7 +90,7 @@ const cases: Record<string, () => Promise<void>> = {
   },
 
   async platform() {
-    const before = await xe.balance('XUSD')
+    const before = await xe.balance('XCU')
     try {
       await runJob(xe, { machine: { vcpus: 512, memoryMb: 1_048_576, diskGb: 1 }, budget, run: 'true' })
       check(false, 'platform: an impossible machine is refused')
@@ -101,7 +101,7 @@ const cases: Record<string, () => Promise<void>> = {
         check(err.message.length > 0, 'platform: says why', err.message)
       }
     }
-    check((await xe.balance('XUSD')) === before, 'platform: nothing paid', fromMicro(before))
+    check((await xe.balance('XCU')) === before, 'platform: nothing paid', fromMicro(before))
   },
 
   async kill() {
@@ -143,26 +143,26 @@ const cases: Record<string, () => Promise<void>> = {
   },
 
   async ceiling() {
-    const before = await xe.balance('XUSD')
+    const before = await xe.balance('XCU')
     try {
       await runJob(xe, { machine, budget, maxPricePerMinute: 1n, run: 'true' })
-      check(false, 'ceiling: a 1 micro-XUSD/min ceiling is refused')
+      check(false, 'ceiling: a 1 micro-XCU/min ceiling is refused')
     } catch (err) {
       check(err instanceof XePriceError, 'ceiling: rejects with XePriceError', String(err))
       if (err instanceof XePriceError) check(err.price > err.ceiling, 'ceiling: says the price and the ceiling', `${err.price} > ${err.ceiling}`)
     }
-    check((await xe.balance('XUSD')) === before, 'ceiling: nothing paid')
+    check((await xe.balance('XCU')) === before, 'ceiling: nothing paid')
   },
 
   async unbounded() {
-    const before = await xe.balance('XUSD')
+    const before = await xe.balance('XCU')
     try {
       await runJob(xe, { machine, run: 'sleep 3600' })
       check(false, 'unbounded: a job with no budget and no timeout is refused')
     } catch (err) {
       check(err instanceof XeUsageError, 'unbounded: rejects with XeUsageError', String(err))
     }
-    check((await xe.balance('XUSD')) === before, 'unbounded: nothing paid')
+    check((await xe.balance('XCU')) === before, 'unbounded: nothing paid')
   },
 
   async child() {

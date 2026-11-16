@@ -35,7 +35,7 @@ interface Sample { code: number; ip: string; dns: number; connect: number; tls: 
 
 const machine = { vcpus: 1, memoryMb: 512, diskGb: 1 }
 const quotes = await xe.quote(machine)
-for (const q of quotes) console.log(`${q.provider.slice(0, 12)}…  ${fromMicro(q.pricePerMinute)} XUSD/min`)
+for (const q of quotes) console.log(`${q.provider.slice(0, 12)}…  ${fromMicro(q.pricePerMinute)} XCU/min`)
 console.log(`checking ${URL} ×${SAMPLES} from ${quotes.length} provider(s)…`)
 
 const jobs = await Promise.all(
@@ -57,7 +57,7 @@ const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.len
 const worst = (xs: number[]) => Math.max(...xs)
 
 for (const job of jobs) {
-  console.log(`\nprovider ${job.provider.slice(0, 12)}… — ${job.status}, paid ${fromMicro(job.paid)} XUSD`)
+  console.log(`\nprovider ${job.provider.slice(0, 12)}… — ${job.status}, paid ${fromMicro(job.paid)} XCU`)
   if (job.status !== 'succeeded') {
     console.log(job.stderr.trim())
     continue

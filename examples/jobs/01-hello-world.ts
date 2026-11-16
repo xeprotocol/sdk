@@ -2,7 +2,7 @@
 //
 // Rent a small machine, run one command, print what it said, and hand the
 // machine back. Takes about a minute and costs one billing minute; the budget
-// makes sure it can never cost more than 0.01 XUSD.
+// makes sure it can never cost more than 0.01 XCU.
 //
 //   node 01-hello-world.ts
 
@@ -24,4 +24,4 @@ const job = await runJob(xe, {
 
 console.log(job.stdout)
 console.log(`${job.status} on ${job.provider.slice(0, 12)}… in ${(job.wallMs / 1000).toFixed(1)}s`)
-console.log(`${fromMicro(job.pricePerMinute)} XUSD/min × ${job.billedMinutes} min = ${fromMicro(job.paid)} XUSD`)
+console.log(`${fromMicro(job.pricePerMinute)} XCU/min × ${job.billedMinutes} min = ${fromMicro(job.paid)} XCU`)
