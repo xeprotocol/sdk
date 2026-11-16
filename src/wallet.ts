@@ -51,7 +51,7 @@ export class Wallet {
     return generatePhrase()
   }
 
-  /** BIP39 + SLIP-0010 ed25519, m/44'/1'/account'. Passphrase is never retained. */
+  /** BIP39 + SLIP-0010 ed25519, m/44'/22597'/account'. Passphrase is never retained. */
   static fromPhrase(phrase: string, options: PhraseOptions = {}): Wallet {
     return new Wallet(seedFromPhrase(phrase, options))
   }
