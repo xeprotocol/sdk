@@ -20,7 +20,7 @@ complete programs are in [`jobs/`](jobs/README.md) and will become tutorials 7�
 How jobs and leases keep you from overpaying is on its own page:
 [Budgets and prices](../docs/budgets.md).
 
-Tutorials 1–4 need nothing but Node.js. Leasing (5–6) is paid in **XUSD**, which
+Tutorials 1–4 need nothing but Node.js. Leasing (5–6) is paid in **XCU**, which
 the testnet faucet does not hand out yet — tutorial 5 explains.
 
 ## Complete programs
@@ -30,7 +30,7 @@ the testnet faucet does not hand out yet — tutorial 5 explains.
   printing `PASS`/`FAIL` lines. Run it from a checkout of this repository after
   `npm install`:
   ```sh
-  XE_SEED=<seed of a wallet holding XUSD> node examples/javascript/hold-lease.mjs
+  XE_SEED=<seed of a wallet holding XCU> node examples/javascript/hold-lease.mjs
   ```
 
 ## Before you start

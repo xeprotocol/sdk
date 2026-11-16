@@ -12,7 +12,7 @@
 // Environment:
 //   XE_NODE         node API                       (default https://ldn.core.test.network)
 //   XE_TIMEKEEPERS  comma-separated timekeeper APIs (default the three testnet bootstraps)
-//   XE_SEED         consumer wallet seed, hex — must hold XUSD
+//   XE_SEED         consumer wallet seed, hex — must hold XCU
 //   XE_PROVIDER     provider address               (default: first with a valid certificate)
 //   HOLD_MINUTES    total term                     (default 10)
 //   RENEW_SECS      seconds per renewal            (default 60)
@@ -40,7 +40,7 @@ const check = (ok, what, detail = '') => {
 const nsToIso = (ns) => new Date(Number(ns / 1_000_000n)).toISOString()
 
 if (!process.env.XE_SEED) {
-  console.error('XE_SEED is required: the consumer wallet seed (hex), funded with XUSD')
+  console.error('XE_SEED is required: the consumer wallet seed (hex), funded with XCU')
   process.exit(2)
 }
 const xe = new Xe({ client: NODE, wallet: Wallet.fromSeedHex(process.env.XE_SEED), timekeepers: TIMEKEEPERS })
@@ -60,8 +60,8 @@ async function pickProvider() {
 
 async function main() {
   log(`node ${NODE} (${await xe.networkId()}), consumer ${xe.address}`)
-  const startXusd = await xe.balance('XUSD')
-  log(`XUSD balance ${fromMicro(startXusd)}`)
+  const startXcu = await xe.balance('XCU')
+  log(`XCU balance ${fromMicro(startXcu)}`)
 
   const tk = await xe.timekeepers()
   check(tk.nodes.length >= tk.set.threshold, 'timekeepers reachable', `${tk.nodes.length} of ${tk.set.keys.length}, threshold ${tk.set.threshold}`)
@@ -76,7 +76,7 @@ async function main() {
     durationSecs: RENEW_SECS,
     accessPubKey: accessKey.publicKey,
   })
-  log(`lease ${opened.hash} with ${provider.slice(0, 12)}…, first minute costs ${fromMicro(opened.cost)} XUSD`)
+  log(`lease ${opened.hash} with ${provider.slice(0, 12)}…, first minute costs ${fromMicro(opened.cost)} XCU`)
   check(true, 'provider accepted the lease', `attempt ${attempts}, started ${nsToIso(accepted.startTime)}, expires ${nsToIso(accepted.effectiveExpiry)}`)
 
   let stopping = false
@@ -99,7 +99,7 @@ async function main() {
         const marginS = Number(oldExpiry - r.renewTime) / 1e9
         if (r.renewTime >= oldExpiry) lateRenewals++
         log(
-          `renewal ${e.lease.renewals.length}: +${r.durationSecs}s for ${fromMicro(r.cost)} XUSD, ` +
+          `renewal ${e.lease.renewals.length}: +${r.durationSecs}s for ${fromMicro(r.cost)} XCU, ` +
             `attested ${marginS.toFixed(1)}s before expiry, epoch ${r.epoch.epoch}; ` +
             `term now ${e.lease.effectiveDuration}s, expires ${nsToIso(e.lease.effectiveExpiry)}`,
         )
@@ -126,7 +126,7 @@ async function main() {
   check(gaps, 'no gap in coverage: each segment was bought while the last was live')
 
   const escrow = lease.renewals.reduce((s, r) => s + r.cost, lease.cost)
-  log(`total escrowed ${fromMicro(escrow)} XUSD for ${lease.effectiveDuration}s; waiting for expiry and settlement…`)
+  log(`total escrowed ${fromMicro(escrow)} XCU for ${lease.effectiveDuration}s; waiting for expiry and settlement…`)
 
   const settleDeadline = Number(lease.effectiveExpiry / 1_000_000n) + 5 * 60_000
   const settled = await xe.waitForLease(opened.hash, ['settled'], {
@@ -134,8 +134,8 @@ async function main() {
     intervalMs: 5_000,
   })
   check(settled.state === 'settled', 'provider settled the lease after the full term', `state ${settled.state}`)
-  const spent = startXusd - (await xe.balance('XUSD'))
-  check(spent === escrow, 'consumer paid exactly the escrowed minutes', `${fromMicro(spent)} XUSD`)
+  const spent = startXcu - (await xe.balance('XCU'))
+  check(spent === escrow, 'consumer paid exactly the escrowed minutes', `${fromMicro(spent)} XCU`)
   const heldMin = ((Date.now() - t0) / 60_000).toFixed(1)
   log(`lease ${opened.hash} held ${lease.effectiveDuration}s in ${lease.renewals.length + 1} one-minute segments (${heldMin} min wall clock)`)
 }

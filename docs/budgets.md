@@ -4,7 +4,8 @@
 > [`examples/jobs/`](../examples/jobs/README.md) use it, and
 > `05-failing-job.ts` checks the budget and ceiling live.
 
-Renting a machine on XE is paid in **XUSD**, a minute at a time. This page covers
+Renting a machine on XE is paid in **XCU** (XE Compute Unit, a
+prepaid compute credit), a minute at a time. This page covers
 what you pay, which controls stop you paying more, and what happens when one of
 them kicks in.
 
@@ -27,7 +28,7 @@ await holdLease(xe, lease.hash, {
 ```
 
 - **You always sign the exact amount.** Every lease and renewal carries its price.
-  The network rejects the block if the price is off by even one micro-XUSD. Nobody
+  The network rejects the block if the price is off by even one micro-XCU. Nobody
   can charge you more than you signed for.
 - **The SDK refuses to sign a price you did not agree to.** There are three limits:
   a **price ceiling**, a **price lock** on renewals (on by default), and a total
@@ -48,13 +49,13 @@ Ask before you rent:
 ```ts
 const quotes = await xe.quote({ vcpus: 1, memoryMb: 1024, diskGb: 1 })
 for (const q of quotes) {
-  console.log(`${q.provider.slice(0, 12)}…  ${fromMicro(q.pricePerMinute)} XUSD/min`)
+  console.log(`${q.provider.slice(0, 12)}…  ${fromMicro(q.pricePerMinute)} XCU/min`)
 }
 ```
 
 `quote` returns every provider that can be leased right now (valid certificate),
 **cheapest first**. On the testnet today, the same small machine costs about
-0.000517 XUSD/min from one provider and 0.001293 XUSD/min from another. For
+0.000517 XCU/min from one provider and 0.001293 XCU/min from another. For
 identical hardware, the choice of provider can make a 2.5× difference.
 
 ## The three limits
@@ -136,7 +137,7 @@ Every result says what it cost:
 
 ```ts
 const job = await runJob(xe, { machine, run: 'make test', budget: toMicro('0.02') })
-console.log(`${fromMicro(job.pricePerMinute)} XUSD/min × ${job.billedMinutes} min = ${fromMicro(job.paid)} XUSD`)
+console.log(`${fromMicro(job.pricePerMinute)} XCU/min × ${job.billedMinutes} min = ${fromMicro(job.paid)} XCU`)
 ```
 
 ## The worst case, exactly
@@ -165,14 +166,14 @@ you, call `quote` and pass `provider` yourself.
 
 | Name | Where | What |
 |---|---|---|
-| `maxPricePerMinute` | `openLease`, `rentLease`, `renewLease`, `holdLease`, `runJob` | micro-XUSD ceiling per minute; also lifts the price lock up to that value |
-| `budget` | `holdLease`, `runJob` | micro-XUSD cap on the lease's total cost |
+| `maxPricePerMinute` | `openLease`, `rentLease`, `renewLease`, `holdLease`, `runJob` | micro-XCU ceiling per minute; also lifts the price lock up to that value |
+| `budget` | `holdLease`, `runJob` | micro-XCU cap on the lease's total cost |
 | `xe.quote(machine)` | `Xe` | `{ provider, pricePerMinute, certificateExpiresAt }[]`, cheapest first |
 | `XePriceError` | thrown | `{ provider, price, ceiling }` — refused before signing |
 | `HoldResult.reason` | `holdLease` | `'target-reached' \| 'aborted' \| 'price-changed' \| 'budget-reached'` |
-| `HoldResult.paid` | `holdLease` | micro-XUSD, first minute + every renewal |
+| `HoldResult.paid` | `holdLease` | micro-XCU, first minute + every renewal |
 | `JobResult.status` | `runJob` | adds `'price-changed' \| 'budget-reached'` |
 | `JobResult.pricePerMinute`, `billedMinutes`, `paid` | `runJob` | what the job cost, and how |
 
-All amounts are **micro-XUSD** as `bigint`. Use `toMicro('0.05')` and
+All amounts are **micro-XCU** as `bigint`. Use `toMicro('0.05')` and
 `fromMicro(n)` to convert.

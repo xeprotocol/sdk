@@ -70,7 +70,7 @@ describe('lease wire form', () => {
       previous: toHash('b'.repeat(64)),
       balance: 18446744073709551000n,
       timestamp: 1790155844400578712n,
-      asset: 'XUSD',
+      asset: 'XCU',
       source: toHash('c'.repeat(64)),
       amount: 1293n,
       duration: 60n,

@@ -3,7 +3,7 @@
 **You will:** keep a machine for as long as you need it, paying one minute at a
 time, and stop cleanly.
 
-**Time:** 15 minutes (most of it the lease running) · **Needs:** [5. Renting a machine](05-renting-a-machine.md) · **Costs:** about 0.005 XUSD for 10 minutes
+**Time:** 15 minutes (most of it the lease running) · **Needs:** [5. Renting a machine](05-renting-a-machine.md) · **Costs:** about 0.005 XCU for 10 minutes
 
 ## Pay for the time you use
 
@@ -41,7 +41,7 @@ const xe = new Xe({
 
 ```ts
 const renewal = await xe.renewLease(leaseHash, 60)
-console.log(`+${renewal.durationSecs}s for ${fromMicro(renewal.cost)} XUSD`)
+console.log(`+${renewal.durationSecs}s for ${fromMicro(renewal.cost)} XCU`)
 ```
 
 ## Hold it open
@@ -85,7 +85,7 @@ minutes:
 ```ts
 const settled = await xe.waitForLease(lease.hash, ['settled'], { timeoutMs: 5 * 60_000, intervalMs: 5_000 })
 const paid = settled.renewals.reduce((sum, r) => sum + r.cost, settled.cost)
-console.log(`${settled.effectiveDuration}s for ${fromMicro(paid)} XUSD`)
+console.log(`${settled.effectiveDuration}s for ${fromMicro(paid)} XCU`)
 ```
 
 ## The complete program
@@ -146,7 +146,7 @@ console.log(`${result.reason} after ${result.renewals.length} renewal(s); waitin
 
 const settled = await xe.waitForLease(lease.hash, ['settled'], { timeoutMs: 5 * 60_000, intervalMs: 5_000 })
 const paid = settled.renewals.reduce((sum, r) => sum + r.cost, settled.cost)
-console.log(`held ${settled.effectiveDuration}s for ${fromMicro(paid)} XUSD`)
+console.log(`held ${settled.effectiveDuration}s for ${fromMicro(paid)} XCU`)
 ```
 
 ```sh

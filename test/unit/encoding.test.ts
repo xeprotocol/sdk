@@ -57,8 +57,8 @@ describe('canonical encoding', () => {
   it('left-aligns and zero-pads the asset field', () => {
     const bytes = marshalCanonical(send({ asset: 'XE' }))
     expect(Array.from(bytes.slice(2, 10))).toEqual([0x58, 0x45, 0, 0, 0, 0, 0, 0])
-    const xusd = marshalCanonical(send({ asset: 'XUSD' }))
-    expect(Array.from(xusd.slice(2, 10))).toEqual([0x58, 0x55, 0x53, 0x44, 0, 0, 0, 0])
+    const xcu = marshalCanonical(send({ asset: 'XCU' }))
+    expect(Array.from(xcu.slice(2, 10))).toEqual([0x58, 0x43, 0x55, 0, 0, 0, 0, 0])
   })
 
   describe('memo rules', () => {
@@ -87,7 +87,7 @@ describe('canonical encoding', () => {
 
   it('refuses block types it cannot yet encode, rather than guessing', () => {
     expect(() =>
-      marshalCanonical({ type: 'mint', account: ADDR, previous: HASH, balance: 1n, timestamp: 2n, asset: 'XUSD' }),
+      marshalCanonical({ type: 'mint', account: ADDR, previous: HASH, balance: 1n, timestamp: 2n, asset: 'XCU' }),
     ).toThrow(/not encodable by this SDK/)
   })
 })
