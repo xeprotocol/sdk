@@ -12,7 +12,7 @@ import {
 import { XeClient, type TimekeeperSet } from '../../src/client.js'
 import { XeUsageError } from '../../src/errors.js'
 import { bytesToHex } from '../../src/hex.js'
-import { toHash, toPublicKey, type Attestation, type PublicKey } from '../../src/types.js'
+import { toHash, type Attestation, type PublicKey } from '../../src/types.js'
 import { Wallet } from '../../src/wallet.js'
 
 const TEST_LEASE = toHash('1'.repeat(64))
