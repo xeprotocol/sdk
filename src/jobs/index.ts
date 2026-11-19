@@ -6,6 +6,7 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { dirname as posixDirname, join as posixJoin } from 'node:path/posix'
 
 import type { LeaseRecord } from '../client.js'
 import { XeBudgetError, XeError, XePriceError, XeUsageError } from '../errors.js'
@@ -116,6 +117,23 @@ const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** Resolve a caller-supplied path relative to `JOB_DIR` on the Linux guest. */
+function remoteJobPath(rel: string, allowRoot = false): string {
+  if (rel.includes('\0')) throw new XeUsageError('runJob: remote path must not contain NUL')
+  const slash = rel.replaceAll('\\', '/')
+  if (slash.startsWith('/')) throw new XeUsageError(`runJob: remote path must be relative to ${JOB_DIR}: ${rel}`)
+  if (!allowRoot && (slash === '.' || slash === '..' || slash.endsWith('/') || slash.endsWith('/.') || slash.endsWith('/..'))) {
+    throw new XeUsageError(`runJob: file path must name a file, not a directory: ${rel}`)
+  }
+  const joined = posixJoin(JOB_DIR, slash)
+  const resolved = allowRoot && joined !== '/' ? joined.replace(/\/+$/, '') : joined
+  if (allowRoot && resolved === JOB_DIR) return resolved
+  if (!resolved.startsWith(`${JOB_DIR}/`)) {
+    throw new XeUsageError(`runJob: remote path must stay inside ${JOB_DIR}: ${rel}`)
+  }
+  return resolved
+}
+
 /**
  * Rent a machine, upload files, run a command, collect results, and release
  * the machine — always, on success or failure. The lease is held open a
@@ -130,6 +148,15 @@ export async function runJob(xe: Xe, options: JobOptions): Promise<JobResult> {
   if (options.budget === undefined && options.timeoutSecs === undefined) {
     throw new XeUsageError('runJob: a job needs a budget or a timeoutSecs, so it cannot run up an unlimited bill')
   }
+  const seenPaths = new Set<string>()
+  const upload: Array<[string, string | Uint8Array]> = []
+  for (const [rawPath, data] of Object.entries(options.files ?? {})) {
+    const target = remoteJobPath(rawPath)
+    if (seenPaths.has(target)) throw new XeUsageError(`runJob: duplicate remote file path: ${rawPath}`)
+    seenPaths.add(target)
+    upload.push([target, data])
+  }
+  const collectDir = remoteJobPath(options.collect ?? 'out', true)
   const t0 = Date.now()
   const emit = options.onEvent ?? (() => {})
   const [host = '', port = '22'] = (options.gateway ?? TESTNET_GATEWAY).split(':')
@@ -241,12 +268,11 @@ export async function runJob(xe: Xe, options: JobOptions): Promise<JobResult> {
 
     if (vm && remote && !stopReason) {
       try {
-        const upload = Object.entries(options.files ?? {})
-        const dirs = new Set([JOB_DIR, ...upload.map(([p]) => dirname(join(JOB_DIR, p)))])
+        const dirs = new Set([JOB_DIR, ...upload.map(([p]) => posixDirname(p))])
         await exec(vm, `mkdir -p ${[...dirs].map(quote).join(' ')}`, () => {}, () => {})
         let bytes = 0
         for (const [path, data] of upload) {
-          await writeRemote(remote, join(JOB_DIR, path), data)
+          await writeRemote(remote, path, data)
           bytes += typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength
         }
         const env = Object.entries({ DEBIAN_FRONTEND: 'noninteractive', ...options.env })
@@ -303,9 +329,8 @@ export async function runJob(xe: Xe, options: JobOptions): Promise<JobResult> {
       }
 
       try {
-        const dir = `${JOB_DIR}/${options.collect ?? 'out'}`
-        for (const path of await listRemote(remote, dir)) {
-          files.push({ path, bytes: await readRemote(remote, `${dir}/${path}`) })
+        for (const path of await listRemote(remote, collectDir)) {
+          files.push({ path, bytes: await readRemote(remote, posixJoin(collectDir, path)) })
         }
         if (options.saveTo) {
           for (const f of files) {
